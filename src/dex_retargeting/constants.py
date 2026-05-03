@@ -29,6 +29,7 @@ class RobotName(enum.Enum):
     ability = enum.auto()
     inspire = enum.auto()
     panda = enum.auto()
+    assembly_1 = enum.auto()
 
 
 class RetargetingType(enum.Enum):
@@ -52,6 +53,7 @@ ROBOT_NAME_MAP = {
     RobotName.ability: "ability_hand",
     RobotName.inspire: "inspire_hand",
     RobotName.panda: "panda_gripper",
+    RobotName.assembly_1: "assembly_1",
 }
 
 ROBOT_NAMES = list(ROBOT_NAME_MAP.keys())

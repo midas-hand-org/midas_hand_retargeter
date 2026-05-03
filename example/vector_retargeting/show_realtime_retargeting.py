@@ -1,4 +1,5 @@
 import multiprocessing
+import sys
 import time
 from pathlib import Path
 from queue import Empty
@@ -11,6 +12,14 @@ import tyro
 from loguru import logger
 from sapien.asset import create_dome_envmap
 from sapien.utils import Viewer
+
+# Prefer local source tree over site-packages when running from this repo.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+LOCAL_SRC = REPO_ROOT / "src"
+if LOCAL_SRC.exists():
+    local_src_str = str(LOCAL_SRC)
+    if local_src_str not in sys.path:
+        sys.path.insert(0, local_src_str)
 
 from dex_retargeting.constants import (
     RobotName,
@@ -26,6 +35,8 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
     RetargetingConfig.set_default_urdf_dir(str(robot_dir))
     logger.info(f"Start retargeting with config {config_path}")
     retargeting = RetargetingConfig.load_from_file(config_path).build()
+    # Start from open-hand neutral instead of joint-limit midpoint.
+    retargeting.set_qpos(np.zeros(retargeting.optimizer.robot.dof, dtype=np.float32))
 
     hand_type = "Right" if "right" in config_path.lower() else "Left"
     detector = SingleHandDetector(hand_type=hand_type, selfie=False)
@@ -87,6 +98,8 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
         loader.scale = 1.4
     elif "svh" in robot_name:
         loader.scale = 1.5
+    elif "assembly_1" in robot_name:
+        loader.scale = 1.4
 
     if "glb" not in robot_name:
         filepath = str(filepath).replace(".urdf", "_glb.urdf")
@@ -109,6 +122,8 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
         robot.set_pose(sapien.Pose([0, 0, -0.15]))
     elif "svh" in robot_name:
         robot.set_pose(sapien.Pose([0, 0, -0.13]))
+    elif "assembly_1" in robot_name:
+        robot.set_pose(sapien.Pose([0, 0, -0.05]))
 
     # Different robot loader may have different orders for joints
     sapien_joint_names = [joint.get_name() for joint in robot.get_active_joints()]
@@ -116,6 +131,30 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
     retargeting_to_sapien = np.array(
         [retargeting_joint_names.index(name) for name in sapien_joint_names]
     ).astype(int)
+    num_fixed = len(retargeting.optimizer.idx_pin2fixed)
+    fixed_qpos = np.zeros(num_fixed, dtype=np.float32)
+    if num_fixed > 0:
+        logger.info(
+            "Using {} fixed joints: {}",
+            num_fixed,
+            retargeting.optimizer.fixed_joint_names,
+        )
+    assembly_debug_joint_names = [
+        "revolute_2_0",
+        "revolute_4_0",
+        "revolute_2_1",
+        "revolute_4_1",
+        "revolute_2_2",
+        "revolute_4_2",
+        "revolute_2_3",
+        "revolute_4_3",
+    ]
+    debug_joint_indices = {
+        name: retargeting_joint_names.index(name)
+        for name in assembly_debug_joint_names
+        if name in retargeting_joint_names
+    }
+    last_debug_t = time.perf_counter()
 
     while True:
         try:
@@ -128,7 +167,8 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
             return
 
         _, joint_pos, keypoint_2d, _ = detector.detect(rgb)
-        bgr = detector.draw_skeleton_on_image(bgr, keypoint_2d, style="default")
+        if keypoint_2d is not None:
+            bgr = detector.draw_skeleton_on_image(bgr, keypoint_2d, style="default")
         cv2.imshow("realtime_retargeting_demo", bgr)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
@@ -145,8 +185,26 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
                 origin_indices = indices[0, :]
                 task_indices = indices[1, :]
                 ref_value = joint_pos[task_indices, :] - joint_pos[origin_indices, :]
-            qpos = retargeting.retarget(ref_value)
-            robot.set_qpos(qpos[retargeting_to_sapien])
+            if not np.isfinite(ref_value).all():
+                logger.warning("Skip frame due to non-finite hand keypoints")
+                continue
+            try:
+                qpos = retargeting.retarget(ref_value, fixed_qpos=fixed_qpos)
+                if not np.isfinite(qpos).all():
+                    logger.warning("Skip frame due to non-finite qpos")
+                    continue
+                if "assembly_1" in robot_name:
+                    now_t = time.perf_counter()
+                    if now_t - last_debug_t > 1.0:
+                        last_debug_t = now_t
+                        debug_state = {
+                            name: float(qpos[idx]) for name, idx in debug_joint_indices.items()
+                        }
+                        logger.info("assembly_1 qpos snapshot: {}", debug_state)
+                robot.set_qpos(qpos[retargeting_to_sapien])
+            except Exception:
+                logger.exception("Retargeting failed for current frame; skipping")
+                continue
 
         for _ in range(2):
             viewer.render()
@@ -154,15 +212,31 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
 
 def produce_frame(queue: multiprocessing.Queue, camera_path: Optional[str] = None):
     if camera_path is None:
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
     else:
-        cap = cv2.VideoCapture(camera_path)
+        import re
+        m = re.search(r'(\d+)$', camera_path)
+        cam_index = int(m.group(1)) if m else 0
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
 
     while cap.isOpened():
         success, image = cap.read()
-        time.sleep(1 / 30.0)
         if not success:
             continue
+        # Drain queue to keep only the latest frame
+        while not queue.empty():
+            try:
+                queue.get_nowait()
+            except Exception:
+                break
         queue.put(image)
 
 
@@ -188,7 +262,7 @@ def main(
         Path(__file__).absolute().parent.parent.parent / "assets" / "robots" / "hands"
     )
 
-    queue = multiprocessing.Queue(maxsize=1000)
+    queue = multiprocessing.Queue(maxsize=2)
     producer_process = multiprocessing.Process(
         target=produce_frame, args=(queue, camera_path)
     )

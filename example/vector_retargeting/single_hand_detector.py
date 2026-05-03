@@ -42,7 +42,8 @@ class SingleHandDetector:
             OPERATOR2MANO_RIGHT if hand_type == "Right" else OPERATOR2MANO_LEFT
         )
         inverse_hand_dict = {"Right": "Left", "Left": "Right"}
-        self.detected_hand_type = hand_type if selfie else inverse_hand_dict[hand_type]
+        # Use non-mirrored handedness labels when selfie=False.
+        self.detected_hand_type = inverse_hand_dict[hand_type] if selfie else hand_type
 
     @staticmethod
     def draw_skeleton_on_image(
