@@ -410,7 +410,7 @@
         <child link="xm335_dummy" />
     </joint>
     <joint name="fixed_node_to_root_joint_0" type="fixed">
-        <origin xyz="0.0119296 0.00429764 -0.00662027" rpy="0 -0 0" />
+        <origin xyz="0.00662027 -0.01192960 0.00429764" rpy="1.57079633 0.00000000 -1.57079633" />
         <axis xyz="6.95574e-28 3.88135e-28 -1" />
         <parent link="root" />
         <child link="arm_interface" />

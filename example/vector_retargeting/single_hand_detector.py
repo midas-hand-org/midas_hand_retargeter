@@ -42,8 +42,10 @@ class SingleHandDetector:
             OPERATOR2MANO_RIGHT if hand_type == "Right" else OPERATOR2MANO_LEFT
         )
         inverse_hand_dict = {"Right": "Left", "Left": "Right"}
-        # Use non-mirrored handedness labels when selfie=False.
-        self.detected_hand_type = inverse_hand_dict[hand_type] if selfie else hand_type
+        # MediaPipe assumes selfie (mirrored) images. In non-selfie (non-mirrored)
+        # mode the right hand appears on the right side of the image, which
+        # MediaPipe mislabels as "Left". So we flip the label when selfie=False.
+        self.detected_hand_type = hand_type if selfie else inverse_hand_dict[hand_type]
 
     @staticmethod
     def draw_skeleton_on_image(
