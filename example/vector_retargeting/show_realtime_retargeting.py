@@ -155,6 +155,7 @@ def _print_debug_snapshot(
     robot_vecs: np.ndarray,
     full_qpos: np.ndarray,
     joint_names: list,
+    joint_limit_map: Dict[str, Tuple[float, float]],
     scaling: float,
     opt_loss: float,
 ):
@@ -202,6 +203,22 @@ def _print_debug_snapshot(
             else:
                 parts.append(f"{jname}=N/A")
         print(f"  {finger_label}: " + "  ".join(parts))
+
+    # Thumb distal joint specific trace
+    thumb_joint = "revolute_4_3"
+    if thumb_joint in joint_names:
+        idx = joint_names.index(thumb_joint)
+        q = float(full_qpos[idx])
+        if thumb_joint in joint_limit_map:
+            lo, hi = joint_limit_map[thumb_joint]
+            span = max(hi - lo, 1e-6)
+            ratio = (q - lo) / span
+            print(
+                f"  [thumb distal] {thumb_joint}={np.degrees(q):+.2f}° "
+                f"(rad={q:+.4f}, limit=[{lo:+.4f}, {hi:+.4f}], ratio={ratio:.3f})"
+            )
+        else:
+            print(f"  [thumb distal] {thumb_joint}={np.degrees(q):+.2f}° (rad={q:+.4f})")
 
     # ── Stage 4: 벡터 잔차 (scaled human vs robot) ───────────────────────────
     print(f"\n[Stage 4] 벡터 잔차 (scaled human vs robot)  opt_loss={opt_loss:.6f}")
@@ -361,6 +378,11 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
         [retargeting_joint_names.index(name) for name in sapien_joint_names]
     ).astype(int)
     joint_name_to_idx = {name: i for i, name in enumerate(retargeting_joint_names)}
+    joint_limit_map: Dict[str, Tuple[float, float]] = {
+        name: tuple(robot_obj.joint_limits[robot_obj.get_joint_index(name)])
+        for name in retargeting_joint_names
+        if name in robot_obj.dof_joint_names
+    }
     dip_limits = {
         name: tuple(robot_obj.joint_limits[robot_obj.get_joint_index(name)])
         for _, name in _ASSEMBLY1_PIP_DIP_COUPLING
@@ -490,7 +512,7 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
                     last_debug_print_t = now_t
                     _print_debug_snapshot(
                         joint_pos, human_vecs, robot_vecs, opt_qpos,
-                        retargeting_joint_names, scaling_factor, last_opt_loss,
+                        retargeting_joint_names, joint_limit_map, scaling_factor, last_opt_loss,
                     )
                     if coupling_debug_pairs:
                         print("[PIP->DIP coupling]")
