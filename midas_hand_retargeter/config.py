@@ -1,0 +1,87 @@
+"""Configuration for the MIDAS vector retargeter."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Mapping, Sequence
+
+from .constants import (
+    ACTIVE_JOINT_NAMES,
+    DEFAULT_TARGET_LINK_HUMAN_INDICES,
+    DEFAULT_TARGET_ORIGIN_LINK_NAMES,
+    DEFAULT_TARGET_TASK_LINK_NAMES,
+)
+from .paths import default_urdf_path
+from .tuning import RetargeterTuning
+from .urdf import with_tip_links
+
+
+@dataclass(frozen=True)
+class MidasRetargeterConfig:
+    """MIDAS-specific wrapper config around ``dex_retargeting``.
+
+    The default uses option 1: optimize active MIDAS joints only and keep the
+    passive DIP/linkage joints fixed in the retargeting FK model. Simulation
+    handles those through MJCF closed-loop constraints; hardware handles them
+    through the API PIP-DIP lookup.
+    """
+
+    urdf_path: str | Path | None = None
+    mujoco_repo: str | Path | None = None
+    target_joint_names: Sequence[str] = ACTIVE_JOINT_NAMES
+    target_origin_link_names: Sequence[str] = DEFAULT_TARGET_ORIGIN_LINK_NAMES
+    target_task_link_names: Sequence[str] = DEFAULT_TARGET_TASK_LINK_NAMES
+    target_link_human_indices: Sequence[Sequence[int]] = DEFAULT_TARGET_LINK_HUMAN_INDICES
+    scaling_factor: float = 1.15
+    normal_delta: float = 4e-3
+    huber_delta: float = 2e-2
+    low_pass_alpha: float = 1.0
+    has_joint_limits: bool = True
+    passive_fixed_qpos: Mapping[str, float] = field(default_factory=dict)
+    coupling_mode: str = "fixed_passive"
+    thumb_postprocess: bool = True
+    finger_postprocess: bool = True
+    tuning: RetargeterTuning = field(default_factory=RetargeterTuning)
+
+    def resolved_urdf_path(self) -> Path:
+        if self.urdf_path is not None:
+            path = Path(self.urdf_path).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"MIDAS hand URDF does not exist: {path}")
+            return path
+        return default_urdf_path(self.mujoco_repo)
+
+    def to_dex_config_dict(self) -> dict:
+        if self.coupling_mode != "fixed_passive":
+            raise NotImplementedError(
+                "Only coupling_mode='fixed_passive' is implemented. "
+                "Option 2 should install a MIDAS kinematic adaptor here."
+            )
+
+        return {
+            "type": "vector",
+            "urdf_path": with_tip_links(str(self.resolved_urdf_path())),
+            "target_joint_names": list(self.target_joint_names),
+            "target_origin_link_names": list(self.target_origin_link_names),
+            "target_task_link_names": list(self.target_task_link_names),
+            "target_link_human_indices": [
+                list(row) for row in self.target_link_human_indices
+            ],
+            "scaling_factor": float(self.scaling_factor),
+            "normal_delta": float(self.normal_delta),
+            "huber_delta": float(self.huber_delta),
+            "low_pass_alpha": float(self.low_pass_alpha),
+            "has_joint_limits": bool(self.has_joint_limits),
+        }
+
+    def build_dex_config(self):
+        try:
+            from dex_retargeting.retargeting_config import RetargetingConfig
+        except ImportError as exc:
+            raise ImportError(
+                "Could not import dex_retargeting. Install this package with "
+                "`pip install -e .` so dex_retargeting and torch are installed."
+            ) from exc
+
+        return RetargetingConfig.from_dict(self.to_dex_config_dict())
