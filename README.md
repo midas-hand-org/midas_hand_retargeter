@@ -13,6 +13,15 @@ Current mode:
 - downstream coupling handled by `midas_hand_mujoco` closed-loop MJCF or
   `midas_hand_api` PIP-DIP lookup
 
+Code map:
+
+- `config.py`: dex-retargeting vector optimizer configuration
+- `retargeter.py`: high-level API and output adapters
+- `postprocess.py`: MIDAS-specific landmark-to-joint correction layer
+- `tuning.py`: user-facing knobs for teleop performance
+- `human.py`: MediaPipe/MANO landmark frame and vector utilities
+- `urdf.py`: temporary retargeting-only fingertip frame generation
+
 Install for development:
 
 ```bash
@@ -49,15 +58,21 @@ mujoco_targets = result.mujoco_control_dict()
 hardware_targets = result.hardware_motor_positions
 ```
 
-Teleop tuning lives in `midas_hand_retargeter/tuning.py`. The most useful
-knobs are:
+Teleop tuning lives in `midas_hand_retargeter/tuning.py`, but it is
+intentionally small. The postprocess layer should mostly follow geometry; these
+knobs are only coarse gains/smoothing:
 
-- `finger_abad_gain`, `finger_abad_limit`, `finger_abad_deadzone`
-- `finger_abad_alpha`, `finger_abad_curl_damping`, and `finger_abad_sign`
-- `thumb_cmc_roll_open`, `thumb_cmc_roll_oppose`
-- `thumb_cmc_side_open`, `thumb_cmc_side_oppose`
-- `thumb_mcp_closed`, `thumb_dip_closed`
-- `thumb_pinch_gain`
+- `finger_curl_gain`
+- `finger_abad_gain`
+- `finger_smoothing_alpha`
+- `thumb_cmc_gain`
+- `thumb_flexion_gain`
+- `thumb_smoothing_alpha`
+
+Use `config.py` for optimizer-level changes such as target links, target human
+landmark indices, scaling factor, and solver losses. Use `tuning.py` for
+operator-facing teleop feel: splay sensitivity, filtering, curl ranges, and
+thumb opposition.
 
 Option 2 placeholder:
 

@@ -25,6 +25,8 @@ OPERATOR2MANO_LEFT = np.array(
 
 
 def as_landmarks(landmarks: np.ndarray) -> np.ndarray:
+    """Validate and normalize a MediaPipe-style 21x3 landmark array."""
+
     result = np.asarray(landmarks, dtype=np.float32)
     if result.shape != (21, 3):
         raise ValueError(f"Expected landmarks with shape (21, 3), got {result.shape}")
@@ -35,7 +37,13 @@ def landmarks_to_vectors(
     landmarks: np.ndarray,
     target_link_human_indices: Sequence[Sequence[int]] = DEFAULT_TARGET_LINK_HUMAN_INDICES,
 ) -> np.ndarray:
-    """Convert 21x3 human landmarks into retargeting vectors."""
+    """Convert 21x3 human landmarks into the configured vector objective.
+
+    ``target_link_human_indices`` has two rows: the origin landmark index for
+    each vector and the task landmark index for each vector. The default uses
+    palm/wrist-to-tip and palm/wrist-to-distal vectors for thumb, index, middle,
+    and ring.
+    """
 
     points = as_landmarks(landmarks)
     indices = np.asarray(target_link_human_indices, dtype=np.int64)
@@ -49,7 +57,12 @@ def landmarks_to_vectors(
 
 
 def estimate_frame_from_hand_points(landmarks: np.ndarray) -> np.ndarray:
-    """Estimate a wrist-centered orientation from MediaPipe world landmarks."""
+    """Estimate a wrist-centered orientation from MediaPipe world landmarks.
+
+    This is inherited from the dex-retargeting example: it builds a stable palm
+    frame from wrist, index MCP, and middle MCP landmarks, then downstream code
+    rotates MediaPipe world points into a MANO-like coordinate convention.
+    """
 
     points = as_landmarks(landmarks)[[0, 5, 9], :]
     x_vector = points[0] - points[2]
@@ -70,7 +83,12 @@ def mediapipe_world_to_mano_landmarks(
     *,
     hand_type: str = "Right",
 ) -> np.ndarray:
-    """Convert MediaPipe world landmarks to the wrist-centered MANO-like frame."""
+    """Convert MediaPipe world landmarks to the wrist-centered MANO-like frame.
+
+    ``hand_type`` selects the right/left operator-to-MANO transform. For a
+    right-hand robot driven by a left physical hand, convert first with the
+    physical hand type and then call ``mirror_landmarks_for_robot_hand``.
+    """
 
     keypoints = as_landmarks(world_landmarks)
     centered = keypoints - keypoints[0:1, :]
