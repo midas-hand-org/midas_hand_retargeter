@@ -1,72 +1,41 @@
-"""Retargeting postprocess tuning knobs.
+"""Small public tuning surface for MIDAS postprocessing.
 
-These values are intentionally separated from the optimizer configuration so
-live teleop behavior can be tuned without touching the dex-retargeting setup.
-All angles are radians.
+Most retargeting behavior should come from geometry and the upstream vector
+optimizer. These gains are intentionally coarse so live teleop tuning does not
+turn into a large pile of hand-fitted constants.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Mapping
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class RetargeterTuning:
-    # Finger curl maps MediaPipe bend amount to the active MIDAS MCP/PIP motors.
-    finger_mcp_pitch_open: float = 0.0
-    finger_mcp_pitch_closed: float = -1.35
-    finger_pip_open: float = 0.0
-    finger_pip_closed: float = -1.22
-    finger_curl_angle_offset: float = 0.18
-    finger_curl_angle_span: float = 1.18
-    finger_curl_closure_offset: float = 0.06
-    finger_curl_closure_span: float = 0.34
+    """Coarse gains for the landmark-derived correction layer.
 
-    # Finger ab/ad uses the lateral angle of each proximal phalanx. Increase
-    # gain for more splay motion; flip a sign below if a finger moves backward.
-    finger_abad_gain: float = 0.38
-    finger_abad_limit: float = 0.24
-    finger_abad_deadzone: float = 0.12
-    finger_abad_alpha: float = 0.16
-    finger_abad_curl_damping: float = 0.65
-    finger_abad_sign: Mapping[str, float] = field(
-        default_factory=lambda: {
-            "index": 1.0,
-            "middle": 1.0,
-            "ring": 1.0,
-        }
-    )
-    finger_abad_neutral: Mapping[str, float] = field(
-        default_factory=lambda: {
-            "index": 0.0,
-            "middle": 0.0,
-            "ring": 0.0,
-        }
-    )
+    Use ``MidasRetargeterConfig`` for optimizer-level tuning such as target
+    links and solver losses. Use this class only when the live MIDAS response
+    needs broad adjustment.
+    """
 
-    # Thumb CMC maps an opposition amount to roll/side motors. Swap open/oppose
-    # values if a joint moves in the wrong direction for your model.
-    thumb_cmc_roll_open: float = 1.25
-    thumb_cmc_roll_oppose: float = 0.35
-    thumb_cmc_side_open: float = -0.30
-    thumb_cmc_side_oppose: float = 0.42
-    thumb_pinch_open_ratio: float = 1.15
-    thumb_pinch_closed_ratio: float = 0.34
-    thumb_pinch_gain: float = 0.85
-    thumb_curl_opposition_gain: float = 0.55
+    # Increase if fingers feel under-curled; decrease if they close too early.
+    finger_curl_gain: float = 1.0
 
-    # Thumb MCP/DIP use MediaPipe thumb joint bends directly. If those joints
-    # feel lazy, reduce the *_closed_angle values or make *_closed more extreme.
-    thumb_mcp_open: float = -0.10
-    thumb_mcp_closed: float = -0.88
-    thumb_mcp_open_angle: float = 0.08
-    thumb_mcp_closed_angle: float = 1.05
-    thumb_dip_open: float = 0.02
-    thumb_dip_closed: float = -0.72
-    thumb_dip_open_angle: float = 0.05
-    thumb_dip_closed_angle: float = 0.88
-    thumb_dip_mcp_follow: float = 0.35
+    # Increase for more MCP ab/ad sweep; decrease if lateral motion is jittery.
+    finger_abad_gain: float = 1.0
+
+    # Low-pass alpha for finger MCP ab/ad. Smaller is smoother but laggier.
+    finger_smoothing_alpha: float = 0.16
+
+    # Shared gain for thumb CMC roll/opposition and side sweep.
+    thumb_cmc_gain: float = 1.0
+
+    # Shared gain for thumb MCP/DIP flexion.
+    thumb_flexion_gain: float = 1.0
+
+    # Low-pass alpha for thumb CMC roll/side. Smaller is smoother but laggier.
+    thumb_smoothing_alpha: float = 0.25
 
 
 DEFAULT_TUNING = RetargeterTuning()
