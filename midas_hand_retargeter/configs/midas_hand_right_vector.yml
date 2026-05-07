@@ -44,5 +44,5 @@ retargeting:
   scaling_factor: 1.15
   normal_delta: 0.004
   huber_delta: 0.02
-  low_pass_alpha: 1.0
+  low_pass_alpha: 0.8
   has_joint_limits: true

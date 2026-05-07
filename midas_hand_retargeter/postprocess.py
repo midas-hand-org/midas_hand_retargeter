@@ -41,9 +41,9 @@ FINGER_MCP_PITCH_RANGE = (0.0, -1.35)
 FINGER_PIP_RANGE = (0.0, -1.22)
 FINGER_CURL_MAX_BEND = 1.35
 FINGER_ABAD_DEADZONE = 0.05
-FINGER_ABAD_SCALE = 0.38
-FINGER_ABAD_LIMIT = 0.24
-FINGER_ABAD_CURL_DAMPING = 0.65
+FINGER_ABAD_SCALE = 1.0
+FINGER_ABAD_LIMIT = 0.785
+FINGER_ABAD_CURL_DAMPING = 0.5
 
 THUMB_CMC_ROLL_RANGE = (0.0, 2.15)
 THUMB_CMC_ROLL_DEADZONE = 0.05
@@ -52,11 +52,12 @@ THUMB_CMC_SIDE_OPEN = 0.0
 THUMB_CMC_SIDE_RANGE = (-0.785, 0.9)
 THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.84
 THUMB_CMC_SIDE_DEADZONE = 0.05
-THUMB_MCP_RANGE = (0.0, -0.88)
-THUMB_MCP_MAX_BEND = 1.05
-THUMB_DIP_RANGE = (0.0, -0.72)
-THUMB_DIP_MAX_BEND = 0.88
-THUMB_DIP_MCP_FOLLOW = 0.35
+
+THUMB_MCP_RANGE = (0.0, -1.57)
+THUMB_MCP_MAX_BEND = 1.57
+THUMB_DIP_RANGE = (0.0, -1.57)
+THUMB_DIP_MAX_BEND = 1.57
+THUMB_DIP_MCP_FOLLOW = 0.3
 
 
 @dataclass
@@ -166,8 +167,9 @@ def thumb_joint_targets_from_landmarks(
         side_angle - THUMB_CMC_SIDE_NEUTRAL_ANGLE,
         THUMB_CMC_SIDE_DEADZONE,
     )
-    side_target = THUMB_CMC_SIDE_OPEN + (
-        tuning.thumb_cmc_gain * side_delta
+    side_gain = tuning.thumb_cmc_gain * tuning.thumb_cmc_side_gain
+    side_target = THUMB_CMC_SIDE_OPEN - (
+        side_gain * side_delta
     )
 
     opposition_angle = _signed_angle_out_of_plane(
@@ -177,8 +179,9 @@ def thumb_joint_targets_from_landmarks(
         palm_normal,
     )
     roll_angle = abs(opposition_angle)
+    roll_gain = tuning.thumb_cmc_gain * tuning.thumb_cmc_roll_gain
     opposition = _smoothstep(
-        tuning.thumb_cmc_gain
+        roll_gain
         * (roll_angle - THUMB_CMC_ROLL_DEADZONE)
         / THUMB_CMC_ROLL_SPAN
     )
@@ -238,19 +241,22 @@ def _finger_splay(
     tuning: RetargeterTuning,
     curl: float,
 ) -> float:
-    """Estimate MCP ab/ad from lateral finger direction.
+    """Estimate MCP ab/ad from palm-local lateral finger direction.
 
     MediaPipe splay is noisy when the finger is curled or partially occluded, so
-    this uses a weighted proximal direction, a deadzone, an explicit limit, and
-    curl-dependent damping.
+    this uses a weighted proximal direction, a palm-local basis, a deadzone, an
+    explicit limit, and curl-dependent damping.
     """
 
     mcp, pip, dip, _ = (points[index] for index in indices)
     proximal = pip - mcp
     secondary = 0.5 * (dip - mcp)
     direction = 0.75 * proximal + 0.25 * secondary
-    forward = abs(float(direction[1])) + 0.35 * abs(float(direction[2])) + 1e-6
-    lateral_angle = float(np.arctan2(direction[0], forward))
+    palm_forward, palm_lateral, palm_normal = _palm_basis(points)
+    in_palm_direction = direction - np.dot(direction, palm_normal) * palm_normal
+    forward = abs(float(np.dot(in_palm_direction, palm_forward))) + 1e-6
+    lateral = float(np.dot(in_palm_direction, palm_lateral))
+    lateral_angle = float(np.arctan2(lateral, forward))
 
     splay = _deadzone(lateral_angle, FINGER_ABAD_DEADZONE)
     curl_damping = 1.0 - FINGER_ABAD_CURL_DAMPING * float(np.clip(curl, 0.0, 1.0))
