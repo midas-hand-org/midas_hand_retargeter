@@ -23,18 +23,27 @@ class RetargeterTuning:
     finger_curl_gain: float = 1.0
 
     # Increase for more MCP ab/ad sweep; decrease if lateral motion is jittery.
-    finger_abad_gain: float = 1.0
+    finger_abad_gain: float = 1.2
 
-    # Low-pass alpha for finger MCP ab/ad. Smaller is smoother but laggier.
-    finger_smoothing_alpha: float = 0.16
+    # Low-pass alpha for landmark-derived finger targets. Smaller is smoother
+    # but laggier; this affects MCP ab/ad, MCP pitch, and PIP curl.
+    finger_smoothing_alpha: float = 0.25
 
-    # Shared gain for thumb CMC roll/opposition and side sweep.
+    # Legacy shared multiplier for both thumb CMC side sweep and roll/opposition.
+    # Leave this at 1.0 when tuning the separate gains below.
     thumb_cmc_gain: float = 1.0
 
-    # Shared gain for thumb MCP/DIP flexion.
-    thumb_flexion_gain: float = 1.0
+    # Increase for more in-plane thumb CMC side sweep.
+    thumb_cmc_side_gain: float = 11.3
 
-    # Low-pass alpha for thumb CMC roll/side. Smaller is smoother but laggier.
+    # Increase for more thumb CMC roll/opposition.
+    thumb_cmc_roll_gain: float = 0.8
+
+    # Shared gain for thumb MCP/DIP flexion.
+    thumb_flexion_gain: float = 2.0
+
+    # Low-pass alpha for landmark-derived thumb targets. Smaller is smoother
+    # but laggier; this affects CMC roll/side plus MCP/DIP flexion.
     thumb_smoothing_alpha: float = 0.25
 
 

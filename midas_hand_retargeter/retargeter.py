@@ -72,6 +72,8 @@ class MidasHandRetargeter:
         }
         self._fixed_qpos = self._build_fixed_qpos()
         self._postprocess_filter = JointTargetFilter()
+        self._neutral_joint_offsets: dict[str, float] = {}
+        self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
         self.reset()
 
     @classmethod
@@ -120,6 +122,10 @@ class MidasHandRetargeter:
         robot_qpos = self._retargeting.retarget(vectors, fixed_qpos=self._fixed_qpos)
         if landmarks is not None:
             robot_qpos = self._apply_landmark_postprocess(robot_qpos, landmarks)
+        self._last_uncalibrated_active_joint_positions = self._active_positions_from_qpos(
+            robot_qpos
+        )
+        robot_qpos = self._apply_neutral_offsets(robot_qpos)
         return self._make_result(robot_qpos, vectors)
 
     def set_qpos(self, robot_qpos: np.ndarray) -> None:
@@ -134,6 +140,40 @@ class MidasHandRetargeter:
             np.zeros(len(self.robot_joint_names), dtype=np.float32)
         )
         self._postprocess_filter.reset()
+
+    @property
+    def neutral_joint_offsets(self) -> dict[str, float]:
+        """Return raw active-joint targets captured as the neutral command pose."""
+
+        return dict(self._neutral_joint_offsets)
+
+    def clear_neutral_offsets(self) -> None:
+        """Remove the current retargeter neutral calibration."""
+
+        self._neutral_joint_offsets.clear()
+
+    def calibrate_neutral_from_last_frame(
+        self,
+        joint_names: tuple[str, ...] | None = None,
+    ) -> dict[str, float]:
+        """Use the latest uncalibrated active targets as the new neutral pose.
+
+        Call this while the human hand is held in the pose that should command
+        MIDAS zero. Future retargeting recenters around this pose and rescales
+        each side to keep the original robot joint limits reachable. The
+        calibration lives in the retargeter layer, so it affects print, MuJoCo,
+        and hardware backends consistently.
+        """
+
+        if not self._last_uncalibrated_active_joint_positions:
+            raise RuntimeError("No retargeting frame is available for neutral calibration")
+        names = joint_names or self.active_joint_names
+        self._neutral_joint_offsets = {
+            name: self._last_uncalibrated_active_joint_positions[name]
+            for name in names
+            if name in self._last_uncalibrated_active_joint_positions
+        }
+        return self.neutral_joint_offsets
 
     def _build_fixed_qpos(self) -> np.ndarray:
         return np.asarray(
@@ -196,11 +236,20 @@ class MidasHandRetargeter:
         return qpos
 
     def _postprocess_filter_alpha(self, joint_name: str) -> float | None:
-        """Return the low-pass alpha for postprocess targets that need smoothing."""
+        """Return the low-pass alpha for landmark-derived postprocess targets."""
 
-        if joint_name.endswith("_mcp_abad_joint"):
+        if joint_name.endswith((
+            "_mcp_abad_joint",
+            "_mcp_pitch_joint",
+            "_pip_joint",
+        )):
             return self.config.tuning.finger_smoothing_alpha
-        if joint_name in {"thumb_cmc_roll_joint", "thumb_cmc_side_joint"}:
+        if joint_name in {
+            "thumb_cmc_roll_joint",
+            "thumb_cmc_side_joint",
+            "thumb_mcp_joint",
+            "thumb_dip_joint",
+        }:
             return self.config.tuning.thumb_smoothing_alpha
         return None
 
@@ -209,8 +258,59 @@ class MidasHandRetargeter:
         lower, upper = self._retargeting.optimizer.robot.joint_limits[joint_index]
         return float(np.clip(value, lower, upper))
 
+    def _apply_neutral_offsets(self, robot_qpos: np.ndarray) -> np.ndarray:
+        """Recenter calibrated joints while preserving their full motion limits.
+
+        A simple subtraction makes the captured neutral pose command zero, but
+        it also shrinks one side of the range. For example, a thumb CMC roll
+        command with limits ``[0, 2.15]`` and neutral ``1.2`` would only reach
+        ``0.95`` after subtraction. This piecewise remap instead keeps neutral
+        at zero and maps the original lower/upper limits back to themselves.
+        """
+
+        qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
+        for joint_name, offset in self._neutral_joint_offsets.items():
+            joint_index = self._joint_index_by_name.get(joint_name)
+            if joint_index is None:
+                continue
+            qpos[joint_index] = self._neutral_calibrated_value(
+                joint_name,
+                float(qpos[joint_index]),
+                offset,
+            )
+        return qpos
+
+    def _neutral_calibrated_value(
+        self,
+        joint_name: str,
+        raw_value: float,
+        neutral_value: float,
+    ) -> float:
+        joint_index = self._joint_index_by_name[joint_name]
+        lower, upper = self._retargeting.optimizer.robot.joint_limits[joint_index]
+        lower = float(lower)
+        upper = float(upper)
+        raw_value = float(np.clip(raw_value, lower, upper))
+        neutral_value = float(np.clip(neutral_value, lower, upper))
+
+        if raw_value >= neutral_value:
+            if upper <= neutral_value:
+                return self._clip_joint(joint_name, 0.0)
+            value = (raw_value - neutral_value) * upper / (upper - neutral_value)
+        else:
+            if neutral_value <= lower:
+                return self._clip_joint(joint_name, 0.0)
+            value = (raw_value - neutral_value) * (-lower) / (neutral_value - lower)
+        return self._clip_joint(joint_name, value)
+
+    def _active_positions_from_qpos(self, robot_qpos: np.ndarray) -> dict[str, float]:
+        return {
+            name: float(robot_qpos[self._joint_index_by_name[name]])
+            for name in self.active_joint_names
+        }
+
     def _make_result(self, robot_qpos: np.ndarray, ref_vectors: np.ndarray) -> RetargetingResult:
-        qpos_by_name: Mapping[str, float] = {
+        qpos_by_name = {
             name: float(robot_qpos[index])
             for index, name in enumerate(self.robot_joint_names)
         }

@@ -58,6 +58,21 @@ mujoco_targets = result.mujoco_control_dict()
 hardware_targets = result.hardware_motor_positions
 ```
 
+To align the retargeter zero with a user-specific neutral pose, retarget one
+frame while the hand is held in neutral and capture calibration references:
+
+```python
+retargeter.retarget_landmarks(neutral_landmarks_21x3)
+offsets = retargeter.calibrate_neutral_from_last_frame()
+
+result = retargeter.retarget_landmarks(human_landmarks_21x3)
+```
+
+Future outputs use those references as zero, then rescale each side so the
+original robot joint limits remain reachable. For example, a one-sided joint
+such as `thumb_cmc_roll_joint` still maps from `0` to `2.15` after calibration.
+Call `retargeter.clear_neutral_offsets()` to return to the raw mapping.
+
 Teleop tuning lives in `midas_hand_retargeter/tuning.py`, but it is
 intentionally small. The postprocess layer should mostly follow geometry; these
 knobs are only coarse gains/smoothing:
@@ -66,6 +81,8 @@ knobs are only coarse gains/smoothing:
 - `finger_abad_gain`
 - `finger_smoothing_alpha`
 - `thumb_cmc_gain`
+- `thumb_cmc_side_gain`
+- `thumb_cmc_roll_gain`
 - `thumb_flexion_gain`
 - `thumb_smoothing_alpha`
 

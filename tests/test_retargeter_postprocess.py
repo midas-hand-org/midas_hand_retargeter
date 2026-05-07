@@ -1,9 +1,14 @@
+from types import SimpleNamespace
+
 import numpy as np
 
 from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
 )
+from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
+from midas_hand_retargeter.retargeter import MidasHandRetargeter
+from midas_hand_retargeter.tuning import RetargeterTuning
 
 
 def _straight_landmarks() -> np.ndarray:
@@ -70,6 +75,32 @@ def test_finger_abduction_responds_to_lateral_splay():
     assert targets["ring_mcp_abad_joint"] > 0.05
 
 
+def test_finger_abduction_is_palm_frame_local():
+    landmarks = _straight_landmarks()
+    landmarks[6] = landmarks[5] + [-0.018, 0.022, 0.0]
+    landmarks[10] = landmarks[9] + [0.010, 0.025, 0.0]
+    landmarks[14] = landmarks[13] + [0.018, 0.022, 0.0]
+    angle = np.deg2rad(32.0)
+    rotation = np.asarray(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    targets = finger_joint_targets_from_landmarks(landmarks)
+    rotated_targets = finger_joint_targets_from_landmarks(landmarks @ rotation.T)
+
+    for finger in ("index", "middle", "ring"):
+        assert np.isclose(
+            rotated_targets[f"{finger}_mcp_abad_joint"],
+            targets[f"{finger}_mcp_abad_joint"],
+            atol=1e-6,
+        )
+
+
 def test_thumb_cmc_ignores_index_tip_motion():
     open_landmarks = _straight_landmarks()
     index_moved_landmarks = _straight_landmarks()
@@ -114,4 +145,135 @@ def test_thumb_side_responds_to_in_plane_sweep():
     open_targets = thumb_joint_targets_from_landmarks(open_landmarks)
     side_targets = thumb_joint_targets_from_landmarks(side_landmarks)
 
-    assert side_targets["thumb_cmc_side_joint"] > open_targets["thumb_cmc_side_joint"]
+    assert side_targets["thumb_cmc_side_joint"] < open_targets["thumb_cmc_side_joint"]
+
+
+def test_thumb_cmc_side_and_roll_gains_are_independent():
+    side_landmarks = _straight_landmarks()
+    side_landmarks[2] = [-0.035, 0.038, 0.0]
+    side_landmarks[3] = [-0.020, 0.056, 0.0]
+    side_landmarks[4] = [-0.005, 0.074, 0.0]
+
+    opposed_landmarks = _straight_landmarks()
+    opposed_landmarks[[2, 3, 4], 2] -= 0.030
+
+    side_low = thumb_joint_targets_from_landmarks(
+        side_landmarks,
+        RetargeterTuning(thumb_cmc_side_gain=0.5, thumb_cmc_roll_gain=1.0),
+    )
+    side_high = thumb_joint_targets_from_landmarks(
+        side_landmarks,
+        RetargeterTuning(thumb_cmc_side_gain=2.0, thumb_cmc_roll_gain=1.0),
+    )
+    assert side_high["thumb_cmc_side_joint"] < side_low["thumb_cmc_side_joint"]
+    assert side_high["thumb_cmc_roll_joint"] == side_low["thumb_cmc_roll_joint"]
+
+    roll_low = thumb_joint_targets_from_landmarks(
+        opposed_landmarks,
+        RetargeterTuning(thumb_cmc_side_gain=1.0, thumb_cmc_roll_gain=0.5),
+    )
+    roll_high = thumb_joint_targets_from_landmarks(
+        opposed_landmarks,
+        RetargeterTuning(thumb_cmc_side_gain=1.0, thumb_cmc_roll_gain=2.0),
+    )
+    assert roll_high["thumb_cmc_roll_joint"] > roll_low["thumb_cmc_roll_joint"]
+    assert roll_high["thumb_cmc_side_joint"] == roll_low["thumb_cmc_side_joint"]
+
+
+def test_postprocess_filter_alpha_covers_landmark_targets():
+    retargeter = object.__new__(MidasHandRetargeter)
+    retargeter.config = SimpleNamespace(
+        tuning=RetargeterTuning(
+            finger_smoothing_alpha=0.12,
+            thumb_smoothing_alpha=0.34,
+        )
+    )
+
+    for joint_name in (
+        "index_mcp_abad_joint",
+        "index_mcp_pitch_joint",
+        "index_pip_joint",
+        "middle_mcp_pitch_joint",
+        "ring_pip_joint",
+    ):
+        assert retargeter._postprocess_filter_alpha(joint_name) == 0.12
+
+    for joint_name in (
+        "thumb_cmc_roll_joint",
+        "thumb_cmc_side_joint",
+        "thumb_mcp_joint",
+        "thumb_dip_joint",
+    ):
+        assert retargeter._postprocess_filter_alpha(joint_name) == 0.34
+
+
+def test_hardware_motor_order_maps_thumb_cmc_roll_to_motor_id_3():
+    assert HARDWARE_MOTOR_JOINT_NAMES[2] == "thumb_cmc_side_joint"
+    assert HARDWARE_MOTOR_JOINT_NAMES[3] == "thumb_cmc_roll_joint"
+
+
+def test_neutral_calibration_preserves_active_joint_ranges():
+    retargeter = object.__new__(MidasHandRetargeter)
+    retargeter.robot_joint_names = (
+        "index_mcp_pitch_joint",
+        "thumb_cmc_side_joint",
+        "thumb_cmc_roll_joint",
+    )
+    retargeter.active_joint_names = retargeter.robot_joint_names
+    retargeter._joint_index_by_name = {
+        name: index
+        for index, name in enumerate(retargeter.robot_joint_names)
+    }
+    retargeter._neutral_joint_offsets = {}
+    retargeter._last_uncalibrated_active_joint_positions = {}
+    retargeter._retargeting = SimpleNamespace(
+        optimizer=SimpleNamespace(
+            robot=SimpleNamespace(
+                joint_limits=np.asarray(
+                    [
+                        [-1.35, 0.0],
+                        [-0.785, 0.9],
+                        [0.0, 2.15],
+                    ],
+                    dtype=np.float32,
+                )
+            )
+        )
+    )
+
+    neutral_qpos = np.asarray([-0.4, 0.25, 1.2], dtype=np.float32)
+    retargeter._last_uncalibrated_active_joint_positions = (
+        retargeter._active_positions_from_qpos(neutral_qpos)
+    )
+
+    offsets = retargeter.calibrate_neutral_from_last_frame()
+
+    assert offsets == {
+        "index_mcp_pitch_joint": float(neutral_qpos[0]),
+        "thumb_cmc_side_joint": float(neutral_qpos[1]),
+        "thumb_cmc_roll_joint": float(neutral_qpos[2]),
+    }
+    np.testing.assert_allclose(
+        retargeter._apply_neutral_offsets(neutral_qpos),
+        [0.0, 0.0, 0.0],
+    )
+    np.testing.assert_allclose(
+        retargeter._apply_neutral_offsets(
+            np.asarray([-0.7, 0.8, 2.15], dtype=np.float32)
+        ),
+        [-0.4263158, 0.7615385, 2.15],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        retargeter._apply_neutral_offsets(
+            np.asarray([-1.35, -0.785, 0.0], dtype=np.float32)
+        ),
+        [-1.35, -0.785, 0.0],
+        atol=1e-6,
+    )
+
+    retargeter.clear_neutral_offsets()
+    np.testing.assert_allclose(
+        retargeter._apply_neutral_offsets(neutral_qpos),
+        neutral_qpos,
+    )

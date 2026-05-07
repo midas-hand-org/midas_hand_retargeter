@@ -27,8 +27,8 @@ ACTIVE_JOINT_NAMES = (
 HARDWARE_MOTOR_JOINT_NAMES = (
     "thumb_dip_joint",
     "thumb_mcp_joint",
-    "thumb_cmc_roll_joint",
     "thumb_cmc_side_joint",
+    "thumb_cmc_roll_joint",
     "index_pip_joint",
     "index_mcp_pitch_joint",
     "index_mcp_abad_joint",
