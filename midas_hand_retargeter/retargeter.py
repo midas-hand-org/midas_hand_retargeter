@@ -7,6 +7,7 @@ from typing import Mapping
 
 import numpy as np
 
+from .adaptor import build_midas_kinematic_adaptor
 from .config import MidasRetargeterConfig
 from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
 from .human import landmarks_to_vectors
@@ -54,7 +55,8 @@ class MidasHandRetargeter:
     conventions:
 
     - ``dex_retargeting`` solves the vector objective.
-    - passive DIP/linkage joints are fixed for option-1 retargeting.
+    - passive DIP/linkage joints are fixed in option 1, or coupled through the
+      MIDAS PIP-DIP lookup adaptor in option 2.
     - optional postprocess heuristics refine MIDAS finger/thumb active joints.
     - outputs are packaged for simulation or hardware callers.
     """
@@ -63,6 +65,21 @@ class MidasHandRetargeter:
         self.config = config or MidasRetargeterConfig()
         dex_config = self.config.build_dex_config()
         self._retargeting = dex_config.build()
+        self._kinematic_adaptor = build_midas_kinematic_adaptor(
+            coupling_mode=self.config.coupling_mode,
+            robot=self._retargeting.optimizer.robot,
+            target_joint_names=self.config.target_joint_names,
+            lookup_path=self.config.pip_dip_lookup_path,
+        )
+        if self._kinematic_adaptor is not None:
+            if self._retargeting.optimizer.adaptor is not None:
+                raise NotImplementedError(
+                    "MIDAS PIP-DIP coupling cannot yet be composed with another "
+                    "dex-retargeting kinematic adaptor."
+                )
+            self._retargeting.optimizer.set_kinematic_adaptor(
+                self._kinematic_adaptor
+            )
 
         self.robot_joint_names = tuple(self._retargeting.joint_names)
         self.active_joint_names = tuple(self.config.target_joint_names)
@@ -126,6 +143,7 @@ class MidasHandRetargeter:
             robot_qpos
         )
         robot_qpos = self._apply_neutral_offsets(robot_qpos)
+        robot_qpos = self._apply_kinematic_adaptor(robot_qpos)
         return self._make_result(robot_qpos, vectors)
 
     def set_qpos(self, robot_qpos: np.ndarray) -> None:
@@ -181,6 +199,16 @@ class MidasHandRetargeter:
                 self.config.passive_fixed_qpos.get(joint_name, 0.0)
                 for joint_name in self.fixed_joint_names
             ],
+            dtype=np.float32,
+        )
+
+    def _apply_kinematic_adaptor(self, robot_qpos: np.ndarray) -> np.ndarray:
+        """Recompute passive joints after postprocess/neutral active edits."""
+
+        if self._kinematic_adaptor is None:
+            return robot_qpos
+        return np.asarray(
+            self._kinematic_adaptor.forward_qpos(np.asarray(robot_qpos).copy()),
             dtype=np.float32,
         )
 
@@ -322,10 +350,7 @@ class MidasHandRetargeter:
             [active[name] for name in HARDWARE_MOTOR_JOINT_NAMES],
             dtype=np.float32,
         )
-        fixed = {
-            name: float(value)
-            for name, value in zip(self.fixed_joint_names, self._fixed_qpos)
-        }
+        fixed = {name: qpos_by_name[name] for name in self.fixed_joint_names}
         return RetargetingResult(
             robot_qpos=np.asarray(robot_qpos, dtype=np.float32),
             robot_joint_names=self.robot_joint_names,

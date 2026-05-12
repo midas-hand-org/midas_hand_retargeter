@@ -9,14 +9,18 @@ Current mode:
 
 - vector-based retargeting
 - active MIDAS joints only
-- passive finger DIP/linkage joints fixed inside the retargeting FK model
-- downstream coupling handled by `midas_hand_mujoco` closed-loop MJCF or
-  `midas_hand_api` PIP-DIP lookup
+- default option 1: passive finger DIP/linkage joints fixed inside the
+  retargeting FK model; downstream coupling handled by `midas_hand_mujoco`
+  closed-loop MJCF or `midas_hand_api` PIP-DIP lookup
+- optional option 2: `coupling_mode="pip_dip_lookup"` fills passive
+  DIP/linkage joints inside retargeting FK from the `midas_hand_api`
+  four-bar lookup table
 
 Code map:
 
 - `config.py`: dex-retargeting vector optimizer configuration
 - `retargeter.py`: high-level API and output adapters
+- `adaptor.py`: option 1/option 2 passive PIP-DIP coupling adaptor
 - `postprocess.py`: MIDAS-specific landmark-to-joint correction layer
 - `tuning.py`: user-facing knobs for teleop performance
 - `human.py`: MediaPipe/MANO landmark frame and vector utilities
@@ -58,6 +62,18 @@ mujoco_targets = result.mujoco_control_dict()
 hardware_targets = result.hardware_motor_positions
 ```
 
+To make fingertip FK see the passive DIP/linkage motion during optimization,
+enable option 2:
+
+```python
+retargeter = MidasHandRetargeter.create(coupling_mode="pip_dip_lookup")
+```
+
+This keeps the optimizer variables as active joints only, but `adaptor.py`
+computes each passive `*_dip_joint` and `*_dip_linkage_joint` from the
+corresponding `*_pip_joint` and folds the passive Jacobian columns back into
+that PIP gradient. Use `coupling_mode="fixed_passive"` to return to option 1.
+
 To align the retargeter zero with a user-specific neutral pose, retarget one
 frame while the hand is held in neutral and capture calibration references:
 
@@ -91,9 +107,9 @@ landmark indices, scaling factor, and solver losses. Use `tuning.py` for
 operator-facing teleop feel: splay sensitivity, filtering, curl ranges, and
 thumb opposition.
 
-Option 2 placeholder:
+Passive coupling modes:
 
-`midas_hand_retargeter.adaptor.MidasCoupledKinematicAdaptor` is reserved for
-adding a PIP-DIP-aware kinematic adaptor later. That adaptor should fill
-passive DIP/linkage qpos from active PIP before FK and fold passive Jacobian
-columns back into the PIP gradient.
+- `fixed_passive`: option 1, simple and stable; passive joints are fixed in FK.
+- `pip_dip_lookup`: option 2, more precise fingertip FK; passive non-thumb
+  DIP/linkage joints follow the packaged MIDAS four-bar lookup from
+  `midas_hand_api`.

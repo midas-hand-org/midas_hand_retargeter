@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .adaptor import FIXED_PASSIVE_MODE, SUPPORTED_COUPLING_MODES
 from .constants import (
     ACTIVE_JOINT_NAMES,
     DEFAULT_TARGET_LINK_HUMAN_INDICES,
@@ -50,10 +51,12 @@ class MidasRetargeterConfig:
     low_pass_alpha: float = 1.0
     has_joint_limits: bool = True
 
-    # Passive joints are fixed in option 1. Future option 2 should replace this
-    # with a kinematic adaptor that couples active PIP to passive DIP/linkage.
+    # Passive-joint handling:
+    #   fixed_passive: option 1, passive joints are fixed during FK.
+    #   pip_dip_lookup: option 2, adaptor fills passive DIP/linkage from PIP.
     passive_fixed_qpos: Mapping[str, float] = field(default_factory=dict)
-    coupling_mode: str = "fixed_passive"
+    coupling_mode: str = FIXED_PASSIVE_MODE
+    pip_dip_lookup_path: str | Path | None = None
 
     # MIDAS-specific landmark correction layer. Disable these for pure upstream
     # vector optimizer output; tune them through ``tuning.py``.
@@ -70,10 +73,10 @@ class MidasRetargeterConfig:
         return default_urdf_path(self.mujoco_repo)
 
     def to_dex_config_dict(self) -> dict:
-        if self.coupling_mode != "fixed_passive":
-            raise NotImplementedError(
-                "Only coupling_mode='fixed_passive' is implemented. "
-                "Option 2 should install a MIDAS kinematic adaptor here."
+        if self.coupling_mode not in SUPPORTED_COUPLING_MODES:
+            raise ValueError(
+                f"Unsupported coupling_mode={self.coupling_mode!r}. "
+                f"Expected one of {SUPPORTED_COUPLING_MODES}."
             )
 
         return {

@@ -2,8 +2,9 @@ retargeting:
   type: vector
   urdf_path: midas_hand_urdf.urdf
 
-  # Active MIDAS joints only. Passive DIP/linkage joints are fixed during
-  # option-1 retargeting and resolved by MuJoCo/API downstream.
+  # Active MIDAS joints only. Use coupling_mode="pip_dip_lookup" in
+  # MidasRetargeterConfig to make passive DIP/linkage FK follow active PIP via
+  # the MIDAS four-bar table; otherwise option 1 keeps them fixed.
   target_joint_names:
     - index_mcp_abad_joint
     - index_mcp_pitch_joint
