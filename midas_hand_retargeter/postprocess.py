@@ -50,7 +50,7 @@ THUMB_CMC_ROLL_DEADZONE = 0.05
 THUMB_CMC_ROLL_SPAN = 0.45
 THUMB_CMC_SIDE_OPEN = 0.0
 THUMB_CMC_SIDE_RANGE = (-0.785, 0.9)
-THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.84
+THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3
 THUMB_CMC_SIDE_DEADZONE = 0.05
 
 THUMB_MCP_RANGE = (0.0, -1.57)
@@ -133,9 +133,6 @@ def thumb_joint_targets_from_landmarks(
     - MCP/DIP flexion uses thumb CMC-MCP-IP-tip bend angles.
     - CMC roll/opposition uses thumb-only palm-normal motion.
     - CMC side uses thumb-only in-plane side sweep.
-
-    This deliberately avoids thumb-index distance so moving the index finger
-    cannot drive thumb opposition while the thumb stays still.
     """
 
     points = as_landmarks(landmarks)
@@ -155,8 +152,7 @@ def thumb_joint_targets_from_landmarks(
 
     palm_forward, palm_lateral, palm_normal = _palm_basis(points)
     thumb_proximal = mcp - cmc
-    thumb_distal = tip - cmc
-    thumb_direction = 0.8 * thumb_proximal + 0.2 * thumb_distal
+    thumb_direction = thumb_proximal
 
     side_angle = _signed_angle_in_plane(
         thumb_direction,

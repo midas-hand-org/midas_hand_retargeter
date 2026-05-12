@@ -34,13 +34,13 @@ class RetargeterTuning:
     thumb_cmc_gain: float = 1.0
 
     # Increase for more in-plane thumb CMC side sweep.
-    thumb_cmc_side_gain: float = 11.3
+    thumb_cmc_side_gain: float = 1.5
 
     # Increase for more thumb CMC roll/opposition.
-    thumb_cmc_roll_gain: float = 0.8
+    thumb_cmc_roll_gain: float = 0.6
 
     # Shared gain for thumb MCP/DIP flexion.
-    thumb_flexion_gain: float = 2.0
+    thumb_flexion_gain: float = 1.2
 
     # Low-pass alpha for landmark-derived thumb targets. Smaller is smoother
     # but laggier; this affects CMC roll/side plus MCP/DIP flexion.
