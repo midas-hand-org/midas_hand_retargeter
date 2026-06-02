@@ -72,3 +72,21 @@ def default_mjcf_path(
     if not path.exists():
         raise FileNotFoundError(f"MIDAS whole-hand MJCF does not exist: {path}")
     return path
+
+
+def default_manipulation_mjcf_path(
+    mujoco_repo: str | os.PathLike[str] | None = None,
+) -> Path:
+    path = midas_description_dir(mujoco_repo) / "midas_manipulation_scene.xml"
+    if not path.exists():
+        raise FileNotFoundError(f"MIDAS manipulation MJCF does not exist: {path}")
+    return path
+
+
+def default_manipulation_desk_mjcf_path(
+    mujoco_repo: str | os.PathLike[str] | None = None,
+) -> Path:
+    path = midas_description_dir(mujoco_repo) / "midas_manipulation_desk_scene.xml"
+    if not path.exists():
+        raise FileNotFoundError(f"MIDAS desk manipulation MJCF does not exist: {path}")
+    return path
