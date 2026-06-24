@@ -233,27 +233,34 @@ class MidasHandRetargeter:
         """
 
         joint_targets: dict[str, float] = {}
+        per_joint_alphas: dict[str, float] = {}
         if self.config.finger_postprocess:
-            joint_targets.update(
-                finger_joint_targets_from_landmarks(landmarks, self.config.tuning)
+            finger_targets, finger_alphas = finger_joint_targets_from_landmarks(
+                landmarks, self.config.tuning
             )
+            joint_targets.update(finger_targets)
+            per_joint_alphas.update(finger_alphas)
         if self.config.thumb_postprocess:
             joint_targets.update(
                 thumb_joint_targets_from_landmarks(landmarks, self.config.tuning)
             )
-        return self._apply_joint_targets(robot_qpos, joint_targets)
+        return self._apply_joint_targets(robot_qpos, joint_targets, per_joint_alphas)
 
     def _apply_joint_targets(
         self,
         robot_qpos: np.ndarray,
         joint_targets: Mapping[str, float],
+        per_joint_alphas: Mapping[str, float] | None = None,
     ) -> np.ndarray:
         qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
         for joint_name, value in joint_targets.items():
             joint_index = self._joint_index_by_name.get(joint_name)
             if joint_index is None:
                 continue
-            filter_alpha = self._postprocess_filter_alpha(joint_name)
+            if per_joint_alphas and joint_name in per_joint_alphas:
+                filter_alpha = per_joint_alphas[joint_name]
+            else:
+                filter_alpha = self._postprocess_filter_alpha(joint_name)
             if filter_alpha is not None:
                 value = self._postprocess_filter.update(
                     joint_name,

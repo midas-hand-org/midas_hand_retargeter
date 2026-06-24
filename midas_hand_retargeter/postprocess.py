@@ -87,7 +87,7 @@ class JointTargetFilter:
 def finger_joint_targets_from_landmarks(
     landmarks: np.ndarray,
     tuning: RetargeterTuning = DEFAULT_TUNING,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, float]]:
     """Map human finger landmarks to active MIDAS finger joint targets.
 
     The mapping is intentionally simple:
@@ -97,29 +97,63 @@ def finger_joint_targets_from_landmarks(
       while the finger curls because splay landmarks become less reliable.
 
     ``RetargeterTuning`` only applies broad curl/ab-ad gains and smoothing.
+
+    Returns a ``(targets, filter_alphas)`` pair. ``filter_alphas`` contains
+    curl-dependent LPF overrides for abad joints — tighter filtering at high
+    curl where lateral landmarks are occluded.
     """
 
     points = as_landmarks(landmarks)
+
+    # Compute all finger curls up front so each finger can reference its
+    # neighbor's curl. When finger N curls it occludes ALL of finger N+1's
+    # joints from the camera.
+    #
+    # Abad alpha uses max(own, neighbor): own curl also makes lateral detection
+    # unreliable, so both sources tighten abad.
+    # Pitch/pip alpha uses neighbor_curl only: own curl makes flexion detection
+    # CLEARER (bend is obvious), so only neighbor-driven occlusion tightens them.
+    curls = [
+        _finger_curl(points, FINGER_LANDMARKS[finger], tuning)
+        for finger in FINGER_NAMES
+    ]
+
     targets: dict[str, float] = {}
-    for finger in FINGER_NAMES:
+    filter_alphas: dict[str, float] = {}
+    for i, finger in enumerate(FINGER_NAMES):
         indices = FINGER_LANDMARKS[finger]
-        curl = _finger_curl(points, indices, tuning)
-        targets[f"{finger}_mcp_abad_joint"] = _finger_splay(
-            points,
-            finger,
-            indices,
-            tuning,
-            curl,
+        curl = curls[i]
+        neighbor_curl = curls[i - 1] if i > 0 else 0.0
+        occlusion_curl = max(curl, neighbor_curl)
+
+        abad_joint = f"{finger}_mcp_abad_joint"
+        targets[abad_joint] = _finger_splay(points, indices, tuning, curl, occlusion_curl)
+        filter_alphas[abad_joint] = _blend(
+            tuning.finger_smoothing_alpha,
+            tuning.finger_abad_alpha_curled,
+            occlusion_curl,
         )
-        targets[f"{finger}_mcp_pitch_joint"] = _blend(
-            *FINGER_MCP_PITCH_RANGE,
-            curl,
-        )
-        targets[f"{finger}_pip_joint"] = _blend(
-            *FINGER_PIP_RANGE,
-            curl,
-        )
-    return targets
+        pitch_joint = f"{finger}_mcp_pitch_joint"
+        pip_joint = f"{finger}_pip_joint"
+        targets[pitch_joint] = _blend(*FINGER_MCP_PITCH_RANGE, curl)
+        targets[pip_joint] = _blend(*FINGER_PIP_RANGE, curl)
+        if occlusion_curl > 0.0:
+            # Use occlusion_curl (max of own + neighbor) so all fingers get equal
+            # dampening when curled. Index has no left neighbor so neighbor_curl
+            # would always be 0; using own curl makes it symmetric with middle/ring.
+            # Scale by 0.2 keeps pitch/pip much lighter than abad.
+            curl_pitch_pip = occlusion_curl * 0.2
+            filter_alphas[pitch_joint] = _blend(
+                tuning.finger_smoothing_alpha,
+                tuning.finger_abad_alpha_curled,
+                curl_pitch_pip,
+            )
+            filter_alphas[pip_joint] = _blend(
+                tuning.finger_smoothing_alpha,
+                tuning.finger_abad_alpha_curled,
+                curl_pitch_pip,
+            )
+    return targets, filter_alphas
 
 
 def thumb_joint_targets_from_landmarks(
@@ -232,16 +266,21 @@ def _finger_curl(
 
 def _finger_splay(
     points: np.ndarray,
-    finger: str,
     indices: tuple[int, int, int, int],
     tuning: RetargeterTuning,
     curl: float,
+    occlusion_curl: float | None = None,
 ) -> float:
     """Estimate MCP ab/ad from palm-local lateral finger direction.
 
     MediaPipe splay is noisy when the finger is curled or partially occluded, so
     this uses a weighted proximal direction, a palm-local basis, a deadzone, an
     explicit limit, and curl-dependent damping.
+
+    ``occlusion_curl`` is the effective curl used for damping — callers pass
+    ``max(own_curl, neighbor_curl)`` so that a curled adjacent finger (which
+    occludes this finger's lateral joints from the camera) also increases damping.
+    Defaults to ``curl`` when not provided.
     """
 
     mcp, pip, dip, _ = (points[index] for index in indices)
@@ -254,8 +293,9 @@ def _finger_splay(
     lateral = float(np.dot(in_palm_direction, palm_lateral))
     lateral_angle = float(np.arctan2(lateral, forward))
 
-    splay = _deadzone(lateral_angle, FINGER_ABAD_DEADZONE)
-    curl_damping = 1.0 - FINGER_ABAD_CURL_DAMPING * float(np.clip(curl, 0.0, 1.0))
+    effective_curl = curl if occlusion_curl is None else occlusion_curl
+    splay = _deadzone(lateral_angle, tuning.finger_abad_deadzone)
+    curl_damping = 1.0 - tuning.finger_abad_curl_damping * float(np.clip(effective_curl, 0.0, 1.0))
     return float(
         np.clip(
             curl_damping * tuning.finger_abad_gain * FINGER_ABAD_SCALE * splay,
