@@ -23,7 +23,7 @@ class RetargeterTuning:
     finger_curl_gain: float = 1.0
 
     # Increase for more MCP ab/ad sweep; decrease if lateral motion is jittery.
-    finger_abad_gain: float = 1.2
+    finger_abad_gain: float = 0.5
 
     # Minimum lateral angle (radians) before abad activates. Raise if small
     # finger tilts that are harmless on thin human fingers collide on the
@@ -32,7 +32,7 @@ class RetargeterTuning:
 
     # How much abad is suppressed as fingers curl. At 1.0, abad goes to zero at
     # full curl (safest for occlusion noise); at 0.0 curl has no effect.
-    finger_abad_curl_damping: float = 0.5
+    finger_abad_curl_damping: float = 0.75
 
     # LPF alpha for abad at full curl. Linearly interpolated from
     # finger_smoothing_alpha (open hand) to this value (fully curled), so the
