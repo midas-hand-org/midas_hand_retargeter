@@ -159,7 +159,7 @@ def finger_joint_targets_from_landmarks(
 def thumb_joint_targets_from_landmarks(
     landmarks: np.ndarray,
     tuning: RetargeterTuning = DEFAULT_TUNING,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, float]]:
     """Map human thumb landmarks to active MIDAS thumb joint targets.
 
     Thumb retargeting has three separate ideas:
@@ -167,6 +167,9 @@ def thumb_joint_targets_from_landmarks(
     - MCP/DIP flexion uses thumb CMC-MCP-IP-tip bend angles.
     - CMC roll/opposition uses thumb-only palm-normal motion.
     - CMC side uses thumb-only in-plane side sweep.
+
+    Returns ``(targets, filter_alphas)``. ``filter_alphas`` tightens the LPF on
+    all thumb joints as the thumb curls, independent of neighboring fingers.
     """
 
     points = as_landmarks(landmarks)
@@ -217,7 +220,7 @@ def thumb_joint_targets_from_landmarks(
     )
     opposition = float(np.clip(opposition, 0.0, 1.0))
 
-    return {
+    targets = {
         "thumb_cmc_roll_joint": _blend(
             *THUMB_CMC_ROLL_RANGE,
             opposition,
@@ -237,6 +240,13 @@ def thumb_joint_targets_from_landmarks(
             dip_curl,
         ),
     }
+    thumb_alpha = _blend(
+        tuning.thumb_smoothing_alpha,
+        tuning.thumb_alpha_curled,
+        opposition,
+    )
+    filter_alphas = {joint: thumb_alpha for joint in targets}
+    return targets, filter_alphas
 
 
 def _finger_curl(

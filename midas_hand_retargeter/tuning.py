@@ -60,5 +60,10 @@ class RetargeterTuning:
     # but laggier; this affects CMC roll/side plus MCP/DIP flexion.
     thumb_smoothing_alpha: float = 0.25
 
+    # LPF alpha for thumb joints at full curl. Linearly interpolated from
+    # thumb_smoothing_alpha (open) to this value (fully curled), based only
+    # on the thumb's own curl — independent of neighboring fingers.
+    thumb_alpha_curled: float = thumb_smoothing_alpha
+
 
 DEFAULT_TUNING = RetargeterTuning()

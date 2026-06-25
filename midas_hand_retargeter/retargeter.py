@@ -241,9 +241,11 @@ class MidasHandRetargeter:
             joint_targets.update(finger_targets)
             per_joint_alphas.update(finger_alphas)
         if self.config.thumb_postprocess:
-            joint_targets.update(
-                thumb_joint_targets_from_landmarks(landmarks, self.config.tuning)
+            thumb_targets, thumb_alphas = thumb_joint_targets_from_landmarks(
+                landmarks, self.config.tuning
             )
+            joint_targets.update(thumb_targets)
+            per_joint_alphas.update(thumb_alphas)
         return self._apply_joint_targets(robot_qpos, joint_targets, per_joint_alphas)
 
     def _apply_joint_targets(
