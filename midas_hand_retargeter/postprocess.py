@@ -220,6 +220,21 @@ def thumb_joint_targets_from_landmarks(
     )
     opposition = float(np.clip(opposition, 0.0, 1.0))
 
+    # Distance-based pinch: thumb tip to index tip distance is orientation-
+    # independent, so it catches pinch attempts that the roll angle misses when
+    # the hand is tilted relative to the camera.
+    index_tip = points[8]
+    pinch_dist = float(np.linalg.norm(tip - index_tip))
+    pinch_range = tuning.thumb_pinch_distance - tuning.thumb_pinch_snap_distance
+    if pinch_range > 1e-6:
+        distance_opposition = _smoothstep(
+            (tuning.thumb_pinch_distance - pinch_dist) / pinch_range
+        )
+    else:
+        distance_opposition = 1.0 if pinch_dist <= tuning.thumb_pinch_snap_distance else 0.0
+    distance_opposition = float(np.clip(distance_opposition, 0.0, tuning.thumb_pinch_opposition_cap))
+    opposition = max(opposition, distance_opposition)
+
     targets = {
         "thumb_cmc_roll_joint": _blend(
             *THUMB_CMC_ROLL_RANGE,
@@ -240,10 +255,13 @@ def thumb_joint_targets_from_landmarks(
             dip_curl,
         ),
     }
+    side_max = max(abs(THUMB_CMC_SIDE_RANGE[0]), abs(THUMB_CMC_SIDE_RANGE[1]))
+    side_amount = float(np.clip(abs(side_target) / side_max, 0.0, 1.0))
+    thumb_activity = max(opposition, mcp_curl, side_amount)
     thumb_alpha = _blend(
         tuning.thumb_smoothing_alpha,
         tuning.thumb_alpha_curled,
-        opposition,
+        thumb_activity,
     )
     filter_alphas = {joint: thumb_alpha for joint in targets}
     return targets, filter_alphas

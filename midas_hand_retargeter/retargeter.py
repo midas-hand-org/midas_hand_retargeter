@@ -18,6 +18,7 @@ from .postprocess import (
 )
 
 
+
 @dataclass(frozen=True)
 class RetargetingResult:
     """Retargeted joint command in several useful output layouts.
@@ -143,6 +144,7 @@ class MidasHandRetargeter:
             robot_qpos
         )
         robot_qpos = self._apply_neutral_offsets(robot_qpos)
+        robot_qpos = self._apply_constant_offsets(robot_qpos)
         robot_qpos = self._apply_kinematic_adaptor(robot_qpos)
         return self._make_result(robot_qpos, vectors)
 
@@ -192,6 +194,27 @@ class MidasHandRetargeter:
             if name in self._last_uncalibrated_active_joint_positions
         }
         return self.neutral_joint_offsets
+
+    def _apply_constant_offsets(self, robot_qpos: np.ndarray) -> np.ndarray:
+        """Apply fixed anatomical biases after neutral calibration.
+
+        These offsets are intentionally applied post-calibration so that
+        pressing 'c' to zero the hand does not absorb or cancel them out.
+        """
+        qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
+        abad_offset = self.config.tuning.finger_abad_outward_offset
+        if abad_offset != 0.0:
+            for finger, sign in (("index", -1.0), ("ring", +1.0)):
+                joint_name = f"{finger}_mcp_abad_joint"
+                idx = self._joint_index_by_name.get(joint_name)
+                if idx is not None:
+                    qpos[idx] = self._clip_joint(joint_name, float(qpos[idx]) + sign * abad_offset)
+        side_offset = self.config.tuning.thumb_cmc_side_outward_offset
+        if side_offset != 0.0:
+            idx = self._joint_index_by_name.get("thumb_cmc_side_joint")
+            if idx is not None:
+                qpos[idx] = self._clip_joint("thumb_cmc_side_joint", float(qpos[idx]) + side_offset)
+        return qpos
 
     def _build_fixed_qpos(self) -> np.ndarray:
         return np.asarray(

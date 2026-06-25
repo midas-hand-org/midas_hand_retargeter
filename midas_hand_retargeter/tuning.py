@@ -30,6 +30,11 @@ class RetargeterTuning:
     # robot's thicker fingers.
     finger_abad_deadzone: float = 0.05
 
+    # Constant outward abad bias added to index and ring fingers at all times
+    # (radians). Index gets -offset (toward thumb), ring gets +offset (away
+    # from thumb). 0.05 rad ≈ 3°. Middle finger is unaffected.
+    finger_abad_outward_offset: float = 0.05
+
     # How much abad is suppressed as fingers curl. At 1.0, abad goes to zero at
     # full curl (safest for occlusion noise); at 0.0 curl has no effect.
     finger_abad_curl_damping: float = 0.75
@@ -47,23 +52,42 @@ class RetargeterTuning:
     # Leave this at 1.0 when tuning the separate gains below.
     thumb_cmc_gain: float = 1.0
 
+    # Constant outward side-sweep bias on the thumb CMC side joint (radians),
+    # applied after neutral calibration so pressing 'c' does not absorb it.
+    thumb_cmc_side_outward_offset: float = 0.2
+
     # Increase for more in-plane thumb CMC side sweep.
     thumb_cmc_side_gain: float = 1.5
 
     # Increase for more thumb CMC roll/opposition.
-    thumb_cmc_roll_gain: float = 0.6
+    thumb_cmc_roll_gain: float = 0.4
 
     # Shared gain for thumb MCP/DIP flexion.
-    thumb_flexion_gain: float = 1.2
+    thumb_flexion_gain: float = 1.5
 
     # Low-pass alpha for landmark-derived thumb targets. Smaller is smoother
     # but laggier; this affects CMC roll/side plus MCP/DIP flexion.
     thumb_smoothing_alpha: float = 0.25
 
-    # LPF alpha for thumb joints at full curl. Linearly interpolated from
-    # thumb_smoothing_alpha (open) to this value (fully curled), based only
-    # on the thumb's own curl — independent of neighboring fingers.
-    thumb_alpha_curled: float = thumb_smoothing_alpha
+    # LPF alpha for thumb joints at full roll. Linearly interpolated from
+    # thumb_smoothing_alpha (open) to this value (fully rolled), based only
+    # on the thumb's own CMC roll — independent of neighboring fingers.
+    thumb_alpha_curled: float = 0.1
+
+    # Distance (meters) at which the thumb-index pinch signal starts blending
+    # in as a secondary opposition source. Orientation-independent complement
+    # to the roll-angle signal.
+    thumb_pinch_distance: float = 0.1
+
+    # Distance (meters) at which the pinch signal reaches full opposition.
+    # Below this the thumb CMC roll is fully driven to close regardless of
+    # roll angle.
+    thumb_pinch_snap_distance: float = 0.01
+
+    # Maximum opposition value (0–1) the distance-based pinch signal can
+    # produce. 1.0 = full CMC roll range; reduce if full roll overshoots past
+    # the index finger into the middle finger.
+    thumb_pinch_opposition_cap: float = 0.65
 
 
 DEFAULT_TUNING = RetargeterTuning()
