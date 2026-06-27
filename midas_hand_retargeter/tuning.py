@@ -52,9 +52,27 @@ class RetargeterTuning:
     # Leave this at 1.0 when tuning the separate gains below.
     thumb_cmc_gain: float = 1.0
 
-    # Constant outward side-sweep bias on the thumb CMC side joint (radians),
-    # applied after neutral calibration so pressing 'c' does not absorb it.
-    thumb_cmc_side_outward_offset: float = 0.2
+    # Resting outward side-sweep bias on the thumb CMC side joint (radians),
+    # applied after neutral calibration so pressing 'c' does not absorb it. This
+    # is also the value used for an index pinch and whenever no pinch is active.
+    thumb_cmc_side_outward_offset: float = 0.25
+
+    # Per-finger outward side bias (radians) the thumb CMC side joint blends
+    # toward as a pinch to that finger engages, keyed off whichever fingertip the
+    # thumb is nearest. The thumb's roll arc otherwise carries the tip back onto
+    # the middle/ring finger base; a larger value here nudges it forward onto the
+    # tip. The blend tracks the same pinch engagement as the opposition cap, so
+    # it is 0-extra at rest and reaches the full value at contact. Index reuses
+    # thumb_cmc_side_outward_offset above. Tune these two per finger; the
+    # relationship across fingers is not assumed linear.
+    thumb_cmc_side_middle_offset: float = 0.5
+    thumb_cmc_side_ring_offset: float = 1.1
+
+    # Low-pass alpha (EMA) for the per-finger thumb CMC side offset. Smaller is
+    # smoother but laggier; 1.0 disables filtering. The offset already blends
+    # continuously across fingers, so this only needs to clean up residual
+    # jitter when the thumb hovers between the middle and ring fingertips.
+    thumb_cmc_side_offset_alpha: float = 0.6
 
     # Increase for more in-plane thumb CMC side sweep.
     thumb_cmc_side_gain: float = 1.5
@@ -84,10 +102,22 @@ class RetargeterTuning:
     # roll angle.
     thumb_pinch_snap_distance: float = 0.01
 
-    # Maximum opposition value (0–1) the distance-based pinch signal can
-    # produce. 1.0 = full CMC roll range; reduce if full roll overshoots past
-    # the index finger into the middle finger.
-    thumb_pinch_opposition_cap: float = 0.55
+    # Maximum opposition value (0–1) the distance-based pinch snap can produce,
+    # per finger. The snap targets whichever fingertip the thumb is nearest, and
+    # the thumb must roll further across the palm to reach middle/ring than
+    # index, so each finger gets a progressively higher cap. 1.0 = full CMC roll
+    # range. Reduce a finger's cap if pinching it overshoots past the fingertip.
+    thumb_pinch_opposition_cap: float = 0.6
+    thumb_pinch_middle_opposition_cap: float = 0.8
+    thumb_pinch_ring_opposition_cap: float = 1
+
+    # Gain on the continuous proximity opposition term. As the thumb tip moves in
+    # over the palm toward the finger bases, CMC roll engages directly — without
+    # needing a fingertip pinch and without relying on the fragile out-of-plane
+    # metacarpal angle. It is built from orientation-independent landmark
+    # distances, so it keeps responding when the hand is edge-on to the camera.
+    # 0 disables the term; raise for earlier/stronger roll engagement.
+    thumb_opposition_proximity_gain: float = 0.6
 
 
 DEFAULT_TUNING = RetargeterTuning()

@@ -52,6 +52,14 @@ FINGER_ABAD_CURL_DAMPING = 0.5
 THUMB_CMC_ROLL_RANGE = (0.0, 2.15)
 THUMB_CMC_ROLL_DEADZONE = 0.05
 THUMB_CMC_ROLL_SPAN = 0.45
+
+# Continuous proximity opposition term. Distance from the thumb tip to the
+# finger-MCP region, normalized by palm length (wrist -> middle MCP) so it is
+# independent of hand size. Ratios are in palm-length units: at/above OPEN the
+# thumb is abducted away from the palm (no opposition); at/below CLOSED the thumb
+# tip is fully in over the palm (full opposition).
+THUMB_OPPOSITION_OPEN_RATIO = 1.2
+THUMB_OPPOSITION_CLOSED_RATIO = 0.5
 THUMB_CMC_SIDE_OPEN = 0.0
 THUMB_CMC_SIDE_RANGE = (-0.785, 0.9)
 THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3
@@ -160,6 +168,87 @@ def finger_joint_targets_from_landmarks(
     return targets, filter_alphas
 
 
+def thumb_pinch_engagements(
+    landmarks: np.ndarray,
+    tuning: RetargeterTuning = DEFAULT_TUNING,
+) -> dict[str, float]:
+    """Per-finger pinch engagement in 0..1, keyed by finger name.
+
+    Each value ramps from 0 at ``thumb_pinch_distance`` to 1 at
+    ``thumb_pinch_snap_distance`` based on the thumb-tip to that finger-tip
+    distance. Unlike a single nearest-finger pick, returning all three lets
+    callers blend continuously between fingers instead of switching discretely.
+    """
+
+    points = as_landmarks(landmarks)
+    tip = points[THUMB_LANDMARKS[3]]
+    pinch_range = tuning.thumb_pinch_distance - tuning.thumb_pinch_snap_distance
+    engagements: dict[str, float] = {}
+    for finger, tip_index in PINCH_FINGER_TIPS.items():
+        distance = float(np.linalg.norm(tip - points[tip_index]))
+        if pinch_range > 1e-6:
+            ramp = _smoothstep((tuning.thumb_pinch_distance - distance) / pinch_range)
+        else:
+            ramp = 1.0 if distance <= tuning.thumb_pinch_snap_distance else 0.0
+        engagements[finger] = float(np.clip(ramp, 0.0, 1.0))
+    return engagements
+
+
+def thumb_pinch_snap(
+    landmarks: np.ndarray,
+    tuning: RetargeterTuning = DEFAULT_TUNING,
+) -> tuple[str, float]:
+    """Return the fingertip the thumb is nearest and the pinch engagement 0..1.
+
+    This is shared by the opposition cap (here in postprocess) and the per-finger
+    CMC side offset (in the retargeter), so both react to the same
+    orientation-independent thumb-to-fingertip distance. The nearest finger is
+    the one with the highest engagement (i.e. smallest thumb-tip distance).
+    """
+
+    engagements = thumb_pinch_engagements(landmarks, tuning)
+    nearest = max(engagements, key=engagements.get)
+    return nearest, engagements[nearest]
+
+
+# Softmax temperature (meters) for blending per-finger thumb CMC side offsets.
+# Smaller keeps each finger's tuned value more distinct (sharper switch); larger
+# blends neighbors more. ~half the adjacent fingertip spacing keeps the tuned
+# values mostly intact while still interpolating across the gap.
+THUMB_SIDE_SELECT_SOFTNESS = 0.012
+
+
+def thumb_pinch_offset_weights(
+    landmarks: np.ndarray,
+    tuning: RetargeterTuning = DEFAULT_TUNING,
+    softness: float = THUMB_SIDE_SELECT_SOFTNESS,
+) -> tuple[dict[str, float], float]:
+    """Return per-finger selection weights and an overall pinch engagement.
+
+    Separates *which* finger the thumb is at from *how* engaged the pinch is:
+
+    - ``weights``: a softmax over negative thumb-tip-to-fingertip distance,
+      summing to 1. It picks the finger selectively (so each finger keeps its
+      tuned offset) yet interpolates smoothly when the thumb is between two
+      fingertips, instead of the hard nearest-finger switch that jumps.
+    - ``engagement``: the strongest per-finger pinch ramp (0..1), used to gate
+      how far the offset blends in from its resting value.
+    """
+
+    points = as_landmarks(landmarks)
+    tip = points[THUMB_LANDMARKS[3]]
+    fingers = list(PINCH_FINGER_TIPS)
+    distances = np.array(
+        [np.linalg.norm(tip - points[PINCH_FINGER_TIPS[f]]) for f in fingers]
+    )
+    logits = -(distances - distances.min()) / max(softness, 1e-6)
+    weights = np.exp(logits)
+    weights = weights / weights.sum()
+    engagements = thumb_pinch_engagements(landmarks, tuning)
+    engagement = max(engagements.values())
+    return {f: float(w) for f, w in zip(fingers, weights)}, float(engagement)
+
+
 def thumb_joint_targets_from_landmarks(
     landmarks: np.ndarray,
     tuning: RetargeterTuning = DEFAULT_TUNING,
@@ -236,21 +325,30 @@ def thumb_joint_targets_from_landmarks(
         "middle": tuning.thumb_pinch_middle_opposition_cap,
         "ring": tuning.thumb_pinch_ring_opposition_cap,
     }
-    pinch_distances = {
-        finger: float(np.linalg.norm(tip - points[tip_index]))
-        for finger, tip_index in PINCH_FINGER_TIPS.items()
-    }
-    nearest_finger = min(pinch_distances, key=pinch_distances.get)
-    pinch_dist = pinch_distances[nearest_finger]
-    pinch_range = tuning.thumb_pinch_distance - tuning.thumb_pinch_snap_distance
-    if pinch_range > 1e-6:
-        pinch_ramp = _smoothstep(
-            (tuning.thumb_pinch_distance - pinch_dist) / pinch_range
-        )
-    else:
-        pinch_ramp = 1.0 if pinch_dist <= tuning.thumb_pinch_snap_distance else 0.0
+    nearest_finger, pinch_ramp = thumb_pinch_snap(points, tuning)
     distance_opposition = float(np.clip(pinch_ramp, 0.0, pinch_caps[nearest_finger]))
     opposition = max(opposition, distance_opposition)
+
+    # Continuous proximity opposition: as the thumb tip comes in over the palm
+    # toward the finger bases, drive roll directly. This uses only inter-landmark
+    # distances (orientation-independent), so unlike the out-of-plane metacarpal
+    # angle it keeps responding when the hand is edge-on, and it tracks free
+    # opposition that translates the thumb over the palm rather than tilting the
+    # metacarpal. Layered as a floor via max(), so it never lowers the angle- or
+    # pinch-driven roll. The finger-MCP centroid is a stable anchor: those bases
+    # barely move as the fingers straighten or curl.
+    proximity_gain = tuning.thumb_opposition_proximity_gain
+    palm_scale = float(np.linalg.norm(points[9] - points[0]))
+    proximity_span = THUMB_OPPOSITION_OPEN_RATIO - THUMB_OPPOSITION_CLOSED_RATIO
+    if proximity_gain > 0.0 and palm_scale > 1e-6 and proximity_span > 1e-6:
+        finger_mcp_centroid = points[[5, 9, 13]].mean(axis=0)
+        tip_ratio = float(np.linalg.norm(tip - finger_mcp_centroid)) / palm_scale
+        proximity_opposition = _smoothstep(
+            proximity_gain
+            * (THUMB_OPPOSITION_OPEN_RATIO - tip_ratio)
+            / proximity_span
+        )
+        opposition = max(opposition, float(np.clip(proximity_opposition, 0.0, 1.0)))
 
     targets = {
         "thumb_cmc_roll_joint": _blend(

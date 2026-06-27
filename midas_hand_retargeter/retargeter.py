@@ -15,6 +15,7 @@ from .postprocess import (
     JointTargetFilter,
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
+    thumb_pinch_offset_weights,
 )
 
 
@@ -144,7 +145,7 @@ class MidasHandRetargeter:
             robot_qpos
         )
         robot_qpos = self._apply_neutral_offsets(robot_qpos)
-        robot_qpos = self._apply_constant_offsets(robot_qpos)
+        robot_qpos = self._apply_constant_offsets(robot_qpos, landmarks=landmarks)
         robot_qpos = self._apply_kinematic_adaptor(robot_qpos)
         return self._make_result(robot_qpos, vectors)
 
@@ -195,11 +196,17 @@ class MidasHandRetargeter:
         }
         return self.neutral_joint_offsets
 
-    def _apply_constant_offsets(self, robot_qpos: np.ndarray) -> np.ndarray:
+    def _apply_constant_offsets(
+        self,
+        robot_qpos: np.ndarray,
+        landmarks: np.ndarray | None = None,
+    ) -> np.ndarray:
         """Apply fixed anatomical biases after neutral calibration.
 
         These offsets are intentionally applied post-calibration so that
-        pressing 'c' to zero the hand does not absorb or cancel them out.
+        pressing 'c' to zero the hand does not absorb or cancel them out. The
+        thumb CMC side bias additionally depends on which finger the thumb is
+        pinching, so it takes the current ``landmarks``.
         """
         qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
         abad_offset = self.config.tuning.finger_abad_outward_offset
@@ -209,12 +216,42 @@ class MidasHandRetargeter:
                 idx = self._joint_index_by_name.get(joint_name)
                 if idx is not None:
                     qpos[idx] = self._clip_joint(joint_name, float(qpos[idx]) + sign * abad_offset)
-        side_offset = self.config.tuning.thumb_cmc_side_outward_offset
+        side_offset = self._thumb_cmc_side_offset(landmarks)
         if side_offset != 0.0:
             idx = self._joint_index_by_name.get("thumb_cmc_side_joint")
             if idx is not None:
                 qpos[idx] = self._clip_joint("thumb_cmc_side_joint", float(qpos[idx]) + side_offset)
         return qpos
+
+    def _thumb_cmc_side_offset(self, landmarks: np.ndarray | None) -> float:
+        """Thumb CMC side bias for the finger(s) the thumb is pinching.
+
+        The resting/index value is ``thumb_cmc_side_outward_offset``. As a pinch
+        engages, the bias blends toward each finger's offset weighted by that
+        finger's pinch engagement, so hovering between the middle and ring
+        fingertips interpolates smoothly instead of switching discretely. A small
+        exponential moving average then removes residual frame-to-frame jitter.
+        """
+
+        tuning = self.config.tuning
+        base = tuning.thumb_cmc_side_outward_offset
+        offset = base
+        if landmarks is not None:
+            weights, engagement = thumb_pinch_offset_weights(landmarks, tuning)
+            finger_offsets = {
+                "index": base,
+                "middle": tuning.thumb_cmc_side_middle_offset,
+                "ring": tuning.thumb_cmc_side_ring_offset,
+            }
+            # Softmax-selected target keeps each finger's tuned value distinct but
+            # interpolates between fingertips; engagement gates how far it blends
+            # in from the resting value.
+            weighted_target = sum(weights[f] * finger_offsets[f] for f in weights)
+            engagement = float(np.clip(engagement, 0.0, 1.0))
+            offset = base + engagement * (weighted_target - base)
+        return self._postprocess_filter.update(
+            "thumb_cmc_side_offset", offset, tuning.thumb_cmc_side_offset_alpha
+        )
 
     def _build_fixed_qpos(self) -> np.ndarray:
         return np.asarray(
