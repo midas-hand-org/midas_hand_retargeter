@@ -87,7 +87,7 @@ class RetargeterTuning:
     # Maximum opposition value (0–1) the distance-based pinch signal can
     # produce. 1.0 = full CMC roll range; reduce if full roll overshoots past
     # the index finger into the middle finger.
-    thumb_pinch_opposition_cap: float = 0.65
+    thumb_pinch_opposition_cap: float = 0.55
 
 
 DEFAULT_TUNING = RetargeterTuning()
