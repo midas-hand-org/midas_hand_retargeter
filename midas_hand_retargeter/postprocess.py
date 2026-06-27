@@ -35,6 +35,10 @@ FINGER_LANDMARKS = {
 # MediaPipe thumb landmark indices: CMC, MCP, IP, tip.
 THUMB_LANDMARKS = (1, 2, 3, 4)
 
+# Fingertip landmark per finger for thumb pinch snapping, derived from
+# FINGER_LANDMARKS so it stays in sync with the three robot fingers.
+PINCH_FINGER_TIPS = {finger: FINGER_LANDMARKS[finger][3] for finger in FINGER_NAMES}
+
 # Internal MIDAS command ranges. These are not live-tuning knobs; they encode
 # the current robot model's useful active-joint range for postprocess targets.
 FINGER_MCP_PITCH_RANGE = (0.0, -1.35)
@@ -220,19 +224,32 @@ def thumb_joint_targets_from_landmarks(
     )
     opposition = float(np.clip(opposition, 0.0, 1.0))
 
-    # Distance-based pinch: thumb tip to index tip distance is orientation-
-    # independent, so it catches pinch attempts that the roll angle misses when
-    # the hand is tilted relative to the camera.
-    index_tip = points[8]
-    pinch_dist = float(np.linalg.norm(tip - index_tip))
+    # Distance-based pinch snap: thumb-tip to finger-tip distance is
+    # orientation-independent, so it catches pinch attempts the roll angle
+    # misses when the hand is tilted relative to the camera. Generalized to all
+    # three fingers: the thumb must roll further across the palm to reach
+    # middle/ring than index, so each finger has its own opposition cap. We snap
+    # toward whichever fingertip the thumb is currently nearest, so reaching for
+    # the middle or ring drives a larger roll than an index pinch.
+    pinch_caps = {
+        "index": tuning.thumb_pinch_opposition_cap,
+        "middle": tuning.thumb_pinch_middle_opposition_cap,
+        "ring": tuning.thumb_pinch_ring_opposition_cap,
+    }
+    pinch_distances = {
+        finger: float(np.linalg.norm(tip - points[tip_index]))
+        for finger, tip_index in PINCH_FINGER_TIPS.items()
+    }
+    nearest_finger = min(pinch_distances, key=pinch_distances.get)
+    pinch_dist = pinch_distances[nearest_finger]
     pinch_range = tuning.thumb_pinch_distance - tuning.thumb_pinch_snap_distance
     if pinch_range > 1e-6:
-        distance_opposition = _smoothstep(
+        pinch_ramp = _smoothstep(
             (tuning.thumb_pinch_distance - pinch_dist) / pinch_range
         )
     else:
-        distance_opposition = 1.0 if pinch_dist <= tuning.thumb_pinch_snap_distance else 0.0
-    distance_opposition = float(np.clip(distance_opposition, 0.0, tuning.thumb_pinch_opposition_cap))
+        pinch_ramp = 1.0 if pinch_dist <= tuning.thumb_pinch_snap_distance else 0.0
+    distance_opposition = float(np.clip(pinch_ramp, 0.0, pinch_caps[nearest_finger]))
     opposition = max(opposition, distance_opposition)
 
     targets = {
