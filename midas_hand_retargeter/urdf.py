@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from pathlib import Path
+import atexit
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
+from functools import lru_cache
+from pathlib import Path
 
 
 TIP_LINKS = {
@@ -51,6 +53,9 @@ def with_tip_links(urdf_path: str) -> str:
         return str(source)
 
     temp_dir = Path(tempfile.mkdtemp(prefix="midas-hand-retargeter-"))
+    # lru_cache bounds this per process, but without cleanup every run left a
+    # directory behind in /tmp forever.
+    atexit.register(shutil.rmtree, temp_dir, True)
     temp_path = temp_dir / source.name
     tree.write(temp_path, encoding="utf-8", xml_declaration=False)
     return str(temp_path)

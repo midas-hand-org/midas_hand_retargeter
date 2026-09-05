@@ -4,19 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "midas-hand-retargeter"
-version = "0.1.0"
-description = "Vector-based MIDAS hand retargeting wrappers around dex_retargeting"
+version = "0.2.0"
+description = "Human hand landmark retargeting for the MIDAS robot hand"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+# The default (analytic) path needs numpy and nothing else. The vector
+# optimizer, and the four-bar lookup used by option-2 coupling, are extras.
 dependencies = [
-    "dex_retargeting>=0.5.0",
     "numpy>=2.0",
-    "pyyaml>=6.0",
-    "torch>=2.0",
 ]
 
 [project.optional-dependencies]
+# dex_retargeting pulls torch (~1.2 GB) plus the CUDA wheel stack (~2.7 GB).
+# Only mode="vector" and mode="refine" need it.
+vector = ["dex_retargeting>=0.5.0", "torch>=2.0"]
+# coupling_mode="pip_dip_lookup" reads the packaged four-bar table.
+lookup = ["midas-hand>=0.1.0"]
 dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/midas-hand-org/midas_hand_retargeter"
+Source = "https://github.com/midas-hand-org/midas_hand_retargeter"
 
 [project.scripts]
 midas-retargeter-smoke = "midas_hand_retargeter.cli:smoke_main"
@@ -26,7 +40,7 @@ where = ["."]
 include = ["midas_hand_retargeter*"]
 
 [tool.setuptools.package-data]
-midas_hand_retargeter = ["configs/*.yml"]
+midas_hand_retargeter = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
