@@ -7,6 +7,7 @@ from midas_hand_retargeter.postprocess import (
     thumb_joint_targets_from_landmarks,
 )
 from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
+from midas_hand_retargeter.model import HandModel
 from midas_hand_retargeter.retargeter import MidasHandRetargeter
 from midas_hand_retargeter.tuning import RetargeterTuning
 
@@ -232,20 +233,21 @@ def test_neutral_calibration_preserves_active_joint_ranges():
     }
     retargeter._neutral_joint_offsets = {}
     retargeter._last_uncalibrated_active_joint_positions = {}
-    retargeter._retargeting = SimpleNamespace(
-        optimizer=SimpleNamespace(
-            robot=SimpleNamespace(
-                joint_limits=np.asarray(
-                    [
-                        [-1.35, 0.0],
-                        [-0.785, 0.9],
-                        [0.0, 2.15],
-                    ],
-                    dtype=np.float32,
-                )
-            )
-        )
+    # Limits now come from the solver-free HandModel, not from the optimizer.
+    # The values below are deliberately NOT the shipped ones: this test pins
+    # the recentering arithmetic, so it supplies its own limits.
+    retargeter._model = HandModel(
+        joint_names=retargeter.robot_joint_names,
+        joint_limits=np.asarray(
+            [
+                [-1.35, 0.0],
+                [-0.785, 0.9],
+                [0.0, 2.15],
+            ],
+            dtype=np.float64,
+        ),
     )
+    retargeter._retargeting = None
 
     neutral_qpos = np.asarray([-0.4, 0.25, 1.2], dtype=np.float32)
     retargeter._last_uncalibrated_active_joint_positions = (

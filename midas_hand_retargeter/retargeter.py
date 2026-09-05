@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Mapping
 
 import numpy as np
 
-from .adaptor import build_midas_kinematic_adaptor
 from .config import MidasRetargeterConfig
 from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
+from .coupling import FIXED_PASSIVE_MODE, LookupPassiveCoupling
 from .human import landmarks_to_vectors
 from .postprocess import (
     JointTargetFilter,
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,8 +66,44 @@ class MidasHandRetargeter:
 
     def __init__(self, config: MidasRetargeterConfig | None = None):
         self.config = config or MidasRetargeterConfig()
-        dex_config = self.config.build_dex_config()
-        self._retargeting = dex_config.build()
+        self._model = self.config.hand_model
+        self.active_joint_names = tuple(self.config.target_joint_names)
+
+        self._retargeting = None
+        self._kinematic_adaptor = None
+        self._passive_coupling = None
+
+        if self.config.uses_optimizer:
+            self._build_optimizer()
+        else:
+            # Analytic path: the joint layout comes from the checked-in model,
+            # so no URDF, no pinocchio and no torch are needed.
+            self.robot_joint_names = self._model.joint_names
+            self.fixed_joint_names = tuple(
+                name for name in self.robot_joint_names
+                if name not in set(self.active_joint_names)
+            )
+            if self.config.coupling_mode != FIXED_PASSIVE_MODE:
+                self._passive_coupling = LookupPassiveCoupling(
+                    self._model,
+                    lookup_path=self.config.pip_dip_lookup_path,
+                )
+
+        self._joint_index_by_name = {
+            name: index for index, name in enumerate(self.robot_joint_names)
+        }
+        self._fixed_qpos = self._build_fixed_qpos()
+        self._postprocess_filter = JointTargetFilter()
+        self._neutral_joint_offsets: dict[str, float] = {}
+        self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
+        self.reset()
+
+    def _build_optimizer(self) -> None:
+        """Construct the dex-retargeting solver and its kinematic adaptor."""
+
+        from .adaptor import build_midas_kinematic_adaptor
+
+        self._retargeting = self.config.build_dex_config().build()
         self._kinematic_adaptor = build_midas_kinematic_adaptor(
             coupling_mode=self.config.coupling_mode,
             robot=self._retargeting.optimizer.robot,
@@ -77,21 +116,18 @@ class MidasHandRetargeter:
                     "MIDAS PIP-DIP coupling cannot yet be composed with another "
                     "dex-retargeting kinematic adaptor."
                 )
-            self._retargeting.optimizer.set_kinematic_adaptor(
-                self._kinematic_adaptor
-            )
+            self._retargeting.optimizer.set_kinematic_adaptor(self._kinematic_adaptor)
 
         self.robot_joint_names = tuple(self._retargeting.joint_names)
-        self.active_joint_names = tuple(self.config.target_joint_names)
         self.fixed_joint_names = tuple(self._retargeting.optimizer.fixed_joint_names)
-        self._joint_index_by_name = {
-            name: index for index, name in enumerate(self.robot_joint_names)
-        }
-        self._fixed_qpos = self._build_fixed_qpos()
-        self._postprocess_filter = JointTargetFilter()
-        self._neutral_joint_offsets: dict[str, float] = {}
-        self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
-        self.reset()
+        if self.robot_joint_names != self._model.joint_names:
+            raise RuntimeError(
+                "Solver joint ordering does not match the checked-in HandModel. "
+                "robot_qpos indexing is a public contract; regenerate "
+                "model.MIDAS_RIGHT_JOINTS from the URDF.\n"
+                f"  solver: {self.robot_joint_names}\n"
+                f"  model:  {self._model.joint_names}"
+            )
 
     @classmethod
     def create(cls, **config_overrides) -> "MidasHandRetargeter":
@@ -101,7 +137,7 @@ class MidasHandRetargeter:
 
     @property
     def dex_retargeting(self):
-        """Expose the underlying ``dex_retargeting.SeqRetargeting`` object."""
+        """The underlying ``SeqRetargeting``, or ``None`` in analytic mode."""
 
         return self._retargeting
 
@@ -136,7 +172,17 @@ class MidasHandRetargeter:
         """
 
         vectors = self._as_ref_vectors(ref_vectors)
-        robot_qpos = self._retargeting.retarget(vectors, fixed_qpos=self._fixed_qpos)
+        if self._retargeting is not None:
+            robot_qpos = self._retargeting.retarget(vectors, fixed_qpos=self._fixed_qpos)
+        else:
+            # Analytic mode: the analytic layer writes every actuated joint, so
+            # there is nothing to solve. Passive slots start at their fixed
+            # values and are recomputed by the coupling below if enabled.
+            robot_qpos = np.zeros(len(self.robot_joint_names), dtype=np.float32)
+            for name, value in self.config.passive_fixed_qpos.items():
+                index = self._joint_index_by_name.get(name)
+                if index is not None:
+                    robot_qpos[index] = value
         if landmarks is not None:
             robot_qpos = self._apply_landmark_postprocess(robot_qpos, landmarks)
         self._last_uncalibrated_active_joint_positions = self._active_positions_from_qpos(
@@ -149,15 +195,28 @@ class MidasHandRetargeter:
     def set_qpos(self, robot_qpos: np.ndarray) -> None:
         """Warm-start the underlying optimizer from a full robot qpos vector."""
 
+        if self._retargeting is None:
+            raise RuntimeError(
+                f"set_qpos() needs the optimizer, but mode={self.config.mode!r} "
+                "does not build one."
+            )
         self._retargeting.set_qpos(np.asarray(robot_qpos, dtype=np.float32))
 
     def reset(self) -> None:
         """Reset optimizer warm-start state and stateful postprocess filters."""
 
+        self._postprocess_filter.reset()
+        self._last_uncalibrated_active_joint_positions = {}
+        if self._retargeting is None:
+            return
+        # Order matters: SeqRetargeting.reset() sets last_qpos to the joint
+        # mid-range, so restore the intended zero warm start afterwards.
+        self._retargeting.reset()
         self._retargeting.set_qpos(
             np.zeros(len(self.robot_joint_names), dtype=np.float32)
         )
-        self._postprocess_filter.reset()
+        if getattr(self._retargeting, "filter", None) is not None:
+            self._retargeting.filter.reset()
 
     @property
     def neutral_joint_offsets(self) -> dict[str, float]:
@@ -205,10 +264,11 @@ class MidasHandRetargeter:
     def _apply_kinematic_adaptor(self, robot_qpos: np.ndarray) -> np.ndarray:
         """Recompute passive joints after postprocess/neutral active edits."""
 
-        if self._kinematic_adaptor is None:
+        coupling = self._kinematic_adaptor or self._passive_coupling
+        if coupling is None:
             return robot_qpos
         return np.asarray(
-            self._kinematic_adaptor.forward_qpos(np.asarray(robot_qpos).copy()),
+            coupling.forward_qpos(np.asarray(robot_qpos).copy()),
             dtype=np.float32,
         )
 
@@ -252,6 +312,11 @@ class MidasHandRetargeter:
         for joint_name, value in joint_targets.items():
             joint_index = self._joint_index_by_name.get(joint_name)
             if joint_index is None:
+                logger.warning(
+                    "Dropping target for unknown joint %r (known joints: %s)",
+                    joint_name,
+                    sorted(self._joint_index_by_name),
+                )
                 continue
             filter_alpha = self._postprocess_filter_alpha(joint_name)
             if filter_alpha is not None:
@@ -282,9 +347,7 @@ class MidasHandRetargeter:
         return None
 
     def _clip_joint(self, joint_name: str, value: float) -> float:
-        joint_index = self._joint_index_by_name[joint_name]
-        lower, upper = self._retargeting.optimizer.robot.joint_limits[joint_index]
-        return float(np.clip(value, lower, upper))
+        return self._model.clip(joint_name, value)
 
     def _apply_neutral_offsets(self, robot_qpos: np.ndarray) -> np.ndarray:
         """Recenter calibrated joints while preserving their full motion limits.
@@ -314,10 +377,7 @@ class MidasHandRetargeter:
         raw_value: float,
         neutral_value: float,
     ) -> float:
-        joint_index = self._joint_index_by_name[joint_name]
-        lower, upper = self._retargeting.optimizer.robot.joint_limits[joint_index]
-        lower = float(lower)
-        upper = float(upper)
+        lower, upper = self._model.limits(joint_name)
         raw_value = float(np.clip(raw_value, lower, upper))
         neutral_value = float(np.clip(neutral_value, lower, upper))
 

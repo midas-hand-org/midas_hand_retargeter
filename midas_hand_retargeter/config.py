@@ -6,16 +6,38 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from .adaptor import FIXED_PASSIVE_MODE, SUPPORTED_COUPLING_MODES
+from .coupling import FIXED_PASSIVE_MODE, normalize_coupling_mode
 from .constants import (
     ACTIVE_JOINT_NAMES,
     DEFAULT_TARGET_LINK_HUMAN_INDICES,
     DEFAULT_TARGET_ORIGIN_LINK_NAMES,
     DEFAULT_TARGET_TASK_LINK_NAMES,
 )
+from .model import MIDAS_RIGHT_HAND, HandModel
 from .paths import default_urdf_path
 from .tuning import RetargeterTuning
 from .urdf import with_tip_links
+
+#: Analytic geometric map only. The default. Needs no dex_retargeting, no
+#: torch and no URDF: the analytic layer writes all 13 actuated joints itself.
+ANALYTIC_MODE = "analytic"
+#: Pure dex-retargeting vector optimizer, analytic layer off. The honest A/B.
+VECTOR_MODE = "vector"
+#: Optimizer first, analytic layer overwrites the joints it owns. This is the
+#: historical behaviour, kept for regression parity. Note the optimizer's
+#: solution is fully overwritten for every actuated joint, so it contributes
+#: nothing to the command; prefer ``analytic`` unless comparing against history.
+REFINE_MODE = "refine"
+SUPPORTED_RETARGET_MODES = (ANALYTIC_MODE, VECTOR_MODE, REFINE_MODE)
+
+
+def normalize_retarget_mode(mode: str) -> str:
+    normalized = str(mode).lower()
+    if normalized not in SUPPORTED_RETARGET_MODES:
+        raise ValueError(
+            f"Unsupported mode={mode!r}. Expected one of {SUPPORTED_RETARGET_MODES}."
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -58,11 +80,57 @@ class MidasRetargeterConfig:
     coupling_mode: str = FIXED_PASSIVE_MODE
     pip_dip_lookup_path: str | Path | None = None
 
-    # MIDAS-specific landmark correction layer. Disable these for pure upstream
-    # vector optimizer output; tune them through ``tuning.py``.
+    # Which retargeting method drives the actuated joints. See the module
+    # constants above. Default is the analytic geometric map.
+    mode: str = ANALYTIC_MODE
+
+    # Joint names and limits. Solver-free, so the analytic path needs no URDF.
+    hand_model: HandModel = MIDAS_RIGHT_HAND
+
+    # MIDAS-specific landmark correction layer. In ``refine`` mode, disabling
+    # these yields pure optimizer output; in ``analytic`` mode disabling them
+    # would leave the affected joints unwritten (commanding 0.0 rad = fully
+    # extended), so it is rejected in __post_init__.
     thumb_postprocess: bool = True
     finger_postprocess: bool = True
     tuning: RetargeterTuning = field(default_factory=RetargeterTuning)
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass: normalize through object.__setattr__ so the
+        # canonical value is stored once instead of re-derived at each use.
+        object.__setattr__(self, "mode", normalize_retarget_mode(self.mode))
+        object.__setattr__(
+            self, "coupling_mode", normalize_coupling_mode(self.coupling_mode)
+        )
+
+        if self.mode == VECTOR_MODE and (self.thumb_postprocess or self.finger_postprocess):
+            object.__setattr__(self, "thumb_postprocess", False)
+            object.__setattr__(self, "finger_postprocess", False)
+
+        if self.mode == ANALYTIC_MODE and not (
+            self.thumb_postprocess and self.finger_postprocess
+        ):
+            disabled = [
+                name
+                for name, on in (
+                    ("finger_postprocess", self.finger_postprocess),
+                    ("thumb_postprocess", self.thumb_postprocess),
+                )
+                if not on
+            ]
+            raise ValueError(
+                f"mode={ANALYTIC_MODE!r} requires the analytic layer, but "
+                f"{' and '.join(disabled)} is disabled. Nothing would write "
+                "those joints, so they would command 0.0 rad (fully extended) "
+                "— a real motion on hardware. Use mode='vector' for pure "
+                "optimizer output, or mode='refine' to mix the two."
+            )
+
+    @property
+    def uses_optimizer(self) -> bool:
+        """Whether this config needs dex_retargeting (and so torch/pinocchio)."""
+
+        return self.mode in (VECTOR_MODE, REFINE_MODE)
 
     def resolved_urdf_path(self) -> Path:
         if self.urdf_path is not None:
@@ -73,12 +141,6 @@ class MidasRetargeterConfig:
         return default_urdf_path(self.mujoco_repo)
 
     def to_dex_config_dict(self) -> dict:
-        if self.coupling_mode not in SUPPORTED_COUPLING_MODES:
-            raise ValueError(
-                f"Unsupported coupling_mode={self.coupling_mode!r}. "
-                f"Expected one of {SUPPORTED_COUPLING_MODES}."
-            )
-
         return {
             "type": "vector",
             "urdf_path": with_tip_links(str(self.resolved_urdf_path())),
