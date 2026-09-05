@@ -1,4 +1,25 @@
-"""Human-hand landmark utilities for MIDAS retargeting."""
+"""Human-hand landmark utilities for MIDAS retargeting.
+
+Required input convention (all landmark sources must match this)
+----------------------------------------------------------------
+Every entry point expects a ``(21, 3)`` float array using the **MediaPipe hand
+landmark ordering** (wrist=0, thumb=1..4, index=5..8, middle=9..12, ring=13..16,
+pinky=17..20) in a **metric, right-handed** coordinate frame. Concretely, for a
+right hand the reference axes are: ``+Y`` distal (wrist -> fingertips), ``+X``
+lateral (index MCP -> ring MCP), ``+Z`` dorsal (back of hand), i.e.
+``cross(+X, +Y) = +Z``.
+
+Only the *chirality* of this frame is load-bearing for the geometric
+postprocess: ``postprocess._palm_basis`` derives forward/lateral directions from
+the landmarks themselves, so an arbitrary rotation of the input washes out, but
+the palm normal is ``cross(lateral, forward)`` — a pseudovector that **flips
+under a reflection**. A source delivered in a mirrored (left-handed) frame will
+curl fingers correctly (curl is a magnitude) yet invert thumb opposition/side
+and finger splay. New sources (e.g. the Manus glove) must therefore preserve
+chirality: apply a proper rotation to align axes, and an *even* number of axis
+reflections. See ``midas_hand_teleop.manus_glove.manus_bridge`` for the glove's
+chirality-correcting remap.
+"""
 
 from __future__ import annotations
 

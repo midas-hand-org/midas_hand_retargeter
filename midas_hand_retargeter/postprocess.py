@@ -39,7 +39,6 @@ THUMB_LANDMARKS = (1, 2, 3, 4)
 # the current robot model's useful active-joint range for postprocess targets.
 FINGER_MCP_PITCH_RANGE = (0.0, -1.35)
 FINGER_PIP_RANGE = (0.0, -1.22)
-FINGER_CURL_MAX_BEND = 1.35
 FINGER_ABAD_DEADZONE = 0.05
 FINGER_ABAD_SCALE = 1.0
 FINGER_ABAD_LIMIT = 0.785
@@ -54,10 +53,12 @@ THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3
 THUMB_CMC_SIDE_DEADZONE = 0.05
 
 THUMB_MCP_RANGE = (0.0, -1.57)
-THUMB_MCP_MAX_BEND = 1.57
 THUMB_DIP_RANGE = (0.0, -1.57)
-THUMB_DIP_MAX_BEND = 1.57
 THUMB_DIP_MCP_FOLLOW = 0.3
+
+# Human bend -> curl normalizers (FINGER_CURL_MAX_BEND, THUMB_MCP_MAX_BEND,
+# THUMB_DIP_MAX_BEND) are source-sensitive and now live on ``RetargeterTuning``
+# so vision and glove can normalize their different measured ROM independently.
 
 
 @dataclass
@@ -144,9 +145,9 @@ def thumb_joint_targets_from_landmarks(
     mcp_bend = _angle_between(cmc_to_mcp, mcp_to_ip)
     dip_bend = _angle_between(mcp_to_ip, ip_to_tip)
 
-    mcp_curl = _smoothstep(tuning.thumb_flexion_gain * mcp_bend / THUMB_MCP_MAX_BEND)
+    mcp_curl = _smoothstep(tuning.thumb_flexion_gain * mcp_bend / tuning.thumb_mcp_max_bend)
     dip_curl = max(
-        _smoothstep(tuning.thumb_flexion_gain * dip_bend / THUMB_DIP_MAX_BEND),
+        _smoothstep(tuning.thumb_flexion_gain * dip_bend / tuning.thumb_dip_max_bend),
         THUMB_DIP_MCP_FOLLOW * mcp_curl,
     )
 
@@ -227,7 +228,7 @@ def _finger_curl(
     pip_bend = _angle_between(proximal, middle)
     dip_bend = _angle_between(middle, distal)
     bend = 0.62 * pip_bend + 0.38 * dip_bend
-    return _smoothstep(tuning.finger_curl_gain * bend / FINGER_CURL_MAX_BEND)
+    return _smoothstep(tuning.finger_curl_gain * bend / tuning.finger_curl_max_bend)
 
 
 def _finger_splay(

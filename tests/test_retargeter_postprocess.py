@@ -18,10 +18,16 @@ def _straight_landmarks() -> np.ndarray:
         landmarks[base + 1] = [x, 0.060, 0.0]
         landmarks[base + 2] = [x, 0.083, 0.0]
         landmarks[base + 3] = [x, 0.105, 0.0]
+    # Thumb: straight (colinear segments) and in-plane (z=0) so MCP/DIP flexion
+    # and CMC roll are zero. The proximal direction sits at the tuned neutral
+    # side angle (THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3 rad, i.e. x:y ~= -0.31) so
+    # a relaxed thumb maps to zero CMC side. (The previous fixture pointed the
+    # thumb at ~-0.84 rad — the pre-87e2061 neutral — so it no longer read as
+    # neutral after the pinching retune.)
     landmarks[1] = [-0.045, 0.020, 0.0]
-    landmarks[2] = [-0.065, 0.038, 0.0]
-    landmarks[3] = [-0.085, 0.056, 0.0]
-    landmarks[4] = [-0.105, 0.074, 0.0]
+    landmarks[2] = [-0.052, 0.042, 0.0]
+    landmarks[3] = [-0.059, 0.064, 0.0]
+    landmarks[4] = [-0.066, 0.086, 0.0]
     return landmarks
 
 
