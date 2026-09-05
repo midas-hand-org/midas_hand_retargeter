@@ -333,3 +333,59 @@ def _deadzone(value: float, deadzone: float) -> float:
 def _blend(a: float, b: float, amount: float) -> float:
     amount = float(np.clip(amount, 0.0, 1.0))
     return a + amount * (b - a)
+
+
+def palm_basis(landmarks: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Public accessor for the palm-local basis ``(forward, lateral, normal)``.
+
+    Exposed so diagnostics and the tuning UI stop reaching for the private
+    ``_palm_basis``.
+    """
+
+    return _palm_basis(as_landmarks(landmarks))
+
+
+def analytic_debug(
+    landmarks: np.ndarray,
+    tuning: RetargetProfile | RetargeterTuning = DEFAULT_PROFILE,
+) -> dict:
+    """Intermediate quantities behind the joint targets, for display.
+
+    A tuning UI that only shows the final joint angle cannot tell "the curl
+    estimate is wrong" from "the output range is too narrow". These are the
+    values between those two steps.
+    """
+
+    profile = as_profile(tuning)
+    points = as_landmarks(landmarks)
+    forward, lateral, normal = _palm_basis(points)
+
+    debug: dict[str, dict] = {}
+    for finger in FINGER_NAMES:
+        params = profile.finger(finger)
+        indices = FINGER_LANDMARKS[finger]
+        curl = _finger_curl(points, indices, params)
+        debug[finger] = {
+            "curl": curl,
+            "curl_damping": 1.0 - params.splay_curl_damping * float(np.clip(curl, 0.0, 1.0)),
+            "splay_rad": _finger_splay(points, indices, params, curl),
+        }
+
+    cmc, mcp, ip, tip = (points[index] for index in THUMB_LANDMARKS)
+    thumb_direction = mcp - cmc
+    side_angle = _signed_angle_in_plane(thumb_direction, forward, lateral)
+    opposition_angle = _signed_angle_out_of_plane(thumb_direction, forward, lateral, normal)
+    debug["thumb"] = {
+        "mcp_bend": _angle_between(mcp - cmc, ip - mcp),
+        "dip_bend": _angle_between(ip - mcp, tip - ip),
+        "side_angle": float(side_angle),
+        "side_delta": float(side_angle - profile.thumb.cmc_side_neutral_angle),
+        "opposition_angle": float(opposition_angle),
+    }
+
+    debug["_palm"] = {
+        "forward": [float(v) for v in forward],
+        "lateral": [float(v) for v in lateral],
+        "normal": [float(v) for v in normal],
+    }
+    return debug
