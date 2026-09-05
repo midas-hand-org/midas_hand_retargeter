@@ -104,3 +104,20 @@ def test_invariant_under_single_axis_flip_and_translation():
     base = _targets(kp)
     moved = (kp @ np.diag([1.0, -1.0, 1.0])) + np.array([0.3, -0.2, 0.9])
     assert np.allclose(_targets(moved), base, atol=1e-5)
+
+
+def test_mirroring_for_the_opposite_hand_is_a_noop_here():
+    """Mirroring is a vector-optimizer tool; it does nothing to this layer.
+
+    Pins the trap directly: someone debugging poor left-hand tracking will
+    reach for ``mirror_landmarks_for_robot_hand`` and see literally no change.
+    """
+
+    from midas_hand_retargeter.human import mirror_landmarks_for_robot_hand
+
+    kp = _nontrivial_hand()
+    mirrored = mirror_landmarks_for_robot_hand(
+        kp, source_hand_type="Left", target_hand_type="Right"
+    )
+    assert not np.allclose(mirrored, kp), "fixture must actually be mirrored"
+    assert np.array_equal(_targets(mirrored), _targets(kp))

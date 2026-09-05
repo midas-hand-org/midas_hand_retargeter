@@ -9,16 +9,31 @@ right hand the reference axes are: ``+Y`` distal (wrist -> fingertips), ``+X``
 lateral (index MCP -> ring MCP), ``+Z`` dorsal (back of hand), i.e.
 ``cross(+X, +Y) = +Z``.
 
-Only the *chirality* of this frame is load-bearing for the geometric
-postprocess: ``postprocess._palm_basis`` derives forward/lateral directions from
-the landmarks themselves, so an arbitrary rotation of the input washes out, but
-the palm normal is ``cross(lateral, forward)`` — a pseudovector that **flips
-under a reflection**. A source delivered in a mirrored (left-handed) frame will
-curl fingers correctly (curl is a magnitude) yet invert thumb opposition/side
-and finger splay. New sources (e.g. the Manus glove) must therefore preserve
-chirality: apply a proper rotation to align axes, and an *even* number of axis
-reflections. See ``midas_hand_teleop.manus_glove.manus_bridge`` for the glove's
-chirality-correcting remap.
+How much does the input frame matter? It depends on which layer you use.
+
+**The analytic layer (``postprocess``) ignores the frame entirely — including
+chirality.** ``_palm_basis`` derives forward/lateral/normal from the landmarks
+themselves, so any rotation washes out. Reflections wash out too, which is less
+obvious: the palm normal ``cross(lateral, forward)`` is a pseudovector and does
+flip, but ``palm_lateral`` is then re-orthogonalized as ``cross(forward,
+normal)``, so the two sign flips cancel and every dot product survives; the one
+remaining sign is killed by the ``abs()`` on the thumb opposition angle. All 13
+targets are therefore bit-identical under rotation, reflection, axis flip and
+translation — see ``tests/test_postprocess_invariance.py``, which pins exactly
+this. A practical consequence: **mirroring glove input to "fix" tracking does
+nothing**, and ``mirror_landmarks_for_robot_hand`` is a no-op for this layer.
+
+**The vector optimizer is handed, and still needs chirality preserved.**
+``landmarks_to_vectors`` feeds Cartesian targets straight to the solver, which
+matches them against a right-handed robot model, so a mirrored frame produces a
+genuinely mirrored solve. Sources feeding ``retarget_vectors`` (or the
+``vector``/``refine`` paths) must apply a proper rotation and an *even* number
+of axis reflections; ``mirror_landmarks_for_robot_hand`` exists for that case.
+See ``midas_hand_teleop.manus_glove.manus_bridge`` for the glove's frame remap.
+
+Since the analytic layer is the default and drives all 13 actuated joints, a
+frame problem is almost never the cause of bad tracking. Look at the tuning
+gains and bend normalizers first.
 """
 
 from __future__ import annotations
@@ -133,6 +148,15 @@ def mirror_landmarks_for_robot_hand(
     landmark geometry. When the detected physical hand is the opposite side,
     mirror the lateral axis in the wrist-centered MANO-like frame before
     building target vectors.
+
+    .. warning::
+       This affects the **vector optimizer only**. The analytic postprocess is
+       reflection-invariant, so on the default (``analytic``) path this call
+       changes nothing — all 13 targets are bit-identical before and after.
+       Left-hand support for the analytic layer is therefore NOT a mirroring
+       problem; it needs a sign-aware splay and a signed (not ``abs()``) thumb
+       opposition, or a left-handed robot model. See the module docstring and
+       ``tests/test_postprocess_invariance.py``.
     """
 
     points = as_landmarks(landmarks).copy()
