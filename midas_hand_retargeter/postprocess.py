@@ -20,8 +20,8 @@ import numpy as np
 
 from .constants import FINGER_NAMES
 from .human import as_landmarks
-from .params import DEFAULT_PROFILE, FingerParams, RetargetProfile, ThumbParams
-from .tuning import DEFAULT_TUNING, RetargeterTuning
+from .params import DEFAULT_PROFILE, FingerParams, RetargetProfile
+from .tuning import RetargeterTuning
 
 
 def as_profile(tuning) -> RetargetProfile:
@@ -31,9 +31,7 @@ def as_profile(tuning) -> RetargetProfile:
         return tuning
     if isinstance(tuning, RetargeterTuning):
         return RetargetProfile.from_legacy_tuning(tuning)
-    raise TypeError(
-        f"Expected RetargetProfile or RetargeterTuning, got {type(tuning).__name__}"
-    )
+    raise TypeError(f"Expected RetargetProfile or RetargeterTuning, got {type(tuning).__name__}")
 
 
 # MediaPipe hand landmark groups for the three robot fingers. Each tuple is
@@ -122,9 +120,7 @@ def finger_joint_targets_from_landmarks(
             continue  # hold last command; the caller keeps the previous value
         indices = FINGER_LANDMARKS[finger]
         curl = _finger_curl(points, indices, params)
-        targets[f"{finger}_mcp_abad_joint"] = _finger_splay(
-            points, indices, params, curl
-        )
+        targets[f"{finger}_mcp_abad_joint"] = _finger_splay(points, indices, params, curl)
         targets[f"{finger}_mcp_pitch_joint"] = _blend(*params.mcp_pitch_range, curl)
         targets[f"{finger}_pip_joint"] = _blend(*params.pip_range, curl)
     return targets
@@ -184,9 +180,7 @@ def thumb_joint_targets_from_landmarks(
     )
     roll_angle = abs(opposition_angle)
     opposition = _smoothstep(
-        params.cmc_roll_gain
-        * (roll_angle - params.cmc_roll_deadzone)
-        / params.cmc_roll_span
+        params.cmc_roll_gain * (roll_angle - params.cmc_roll_deadzone) / params.cmc_roll_span
     )
     opposition = float(np.clip(opposition, 0.0, 1.0))
 
@@ -209,11 +203,7 @@ def _finger_curl(
     proximal = pip - mcp
     middle = dip - pip
     distal = tip - dip
-    segment_lengths = (
-        np.linalg.norm(proximal)
-        + np.linalg.norm(middle)
-        + np.linalg.norm(distal)
-    )
+    segment_lengths = np.linalg.norm(proximal) + np.linalg.norm(middle) + np.linalg.norm(distal)
     if segment_lengths < 1e-6:
         return 0.0
 

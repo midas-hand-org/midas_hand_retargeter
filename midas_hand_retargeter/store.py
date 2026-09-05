@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import Mapping
+from collections.abc import Mapping
 
 from .params import DEFAULT_PROFILE, RetargetProfile
 

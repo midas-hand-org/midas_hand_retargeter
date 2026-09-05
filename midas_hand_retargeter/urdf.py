@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 
-
 TIP_LINKS = {
     "thumb_tip": ("thumb_dip", "0 -0.042 -0.010"),
     "index_tip": ("index_dip_link", "0 0.036 -0.009"),

@@ -4,8 +4,8 @@ import numpy as np
 
 from midas_hand_retargeter.adaptor import (
     FIXED_PASSIVE_MODE,
-    MidasCoupledKinematicAdaptor,
     PIP_DIP_LOOKUP_MODE,
+    MidasCoupledKinematicAdaptor,
     build_midas_kinematic_adaptor,
 )
 from midas_hand_retargeter.constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
@@ -55,31 +55,26 @@ class _LinearLookup:
 def _adaptor() -> MidasCoupledKinematicAdaptor:
     return MidasCoupledKinematicAdaptor(
         robot=_FakeRobot(),
-        target_joint_names=[
-            name
-            for name in _FakeRobot.dof_joint_names
-            if "dip" not in name
-        ],
+        target_joint_names=[name for name in _FakeRobot.dof_joint_names if "dip" not in name],
         lookup=_LinearLookup(),
     )
 
 
 def test_build_adaptor_switches_between_option_1_and_option_2():
     robot = _FakeRobot()
-    assert build_midas_kinematic_adaptor(
-        coupling_mode=FIXED_PASSIVE_MODE,
-        robot=robot,
-        target_joint_names=ACTIVE_JOINT_NAMES,
-    ) is None
+    assert (
+        build_midas_kinematic_adaptor(
+            coupling_mode=FIXED_PASSIVE_MODE,
+            robot=robot,
+            target_joint_names=ACTIVE_JOINT_NAMES,
+        )
+        is None
+    )
 
     adaptor = build_midas_kinematic_adaptor(
         coupling_mode=PIP_DIP_LOOKUP_MODE,
         robot=robot,
-        target_joint_names=[
-            name
-            for name in robot.dof_joint_names
-            if "dip" not in name
-        ],
+        target_joint_names=[name for name in robot.dof_joint_names if "dip" not in name],
         lookup_path=None,
     )
     assert isinstance(adaptor, MidasCoupledKinematicAdaptor)

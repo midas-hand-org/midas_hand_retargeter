@@ -1,14 +1,12 @@
-from types import SimpleNamespace
-
 import numpy as np
 
+from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
+from midas_hand_retargeter.model import HandModel
+from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
 )
-from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
-from midas_hand_retargeter.model import HandModel
-from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.retargeter import MidasHandRetargeter
 from midas_hand_retargeter.tuning import RetargeterTuning
 
@@ -58,7 +56,9 @@ def test_finger_postprocess_curls_mcp_and_pip():
     curled_targets = finger_joint_targets_from_landmarks(_curled_landmarks())
 
     for finger in ("index", "middle", "ring"):
-        assert curled_targets[f"{finger}_mcp_pitch_joint"] < open_targets[f"{finger}_mcp_pitch_joint"]
+        assert (
+            curled_targets[f"{finger}_mcp_pitch_joint"] < open_targets[f"{finger}_mcp_pitch_joint"]
+        )
         assert curled_targets[f"{finger}_pip_joint"] < open_targets[f"{finger}_pip_joint"]
 
 
@@ -243,8 +243,7 @@ def test_neutral_calibration_preserves_active_joint_ranges():
     )
     retargeter.active_joint_names = retargeter.robot_joint_names
     retargeter._joint_index_by_name = {
-        name: index
-        for index, name in enumerate(retargeter.robot_joint_names)
+        name: index for index, name in enumerate(retargeter.robot_joint_names)
     }
     retargeter._neutral_joint_offsets = {}
     retargeter._last_uncalibrated_active_joint_positions = {}
@@ -265,8 +264,8 @@ def test_neutral_calibration_preserves_active_joint_ranges():
     retargeter._retargeting = None
 
     neutral_qpos = np.asarray([-0.4, 0.25, 1.2], dtype=np.float32)
-    retargeter._last_uncalibrated_active_joint_positions = (
-        retargeter._active_positions_from_qpos(neutral_qpos)
+    retargeter._last_uncalibrated_active_joint_positions = retargeter._active_positions_from_qpos(
+        neutral_qpos
     )
 
     offsets = retargeter.calibrate_neutral_from_last_frame()
@@ -281,16 +280,12 @@ def test_neutral_calibration_preserves_active_joint_ranges():
         [0.0, 0.0, 0.0],
     )
     np.testing.assert_allclose(
-        retargeter._apply_neutral_offsets(
-            np.asarray([-0.7, 0.8, 2.15], dtype=np.float32)
-        ),
+        retargeter._apply_neutral_offsets(np.asarray([-0.7, 0.8, 2.15], dtype=np.float32)),
         [-0.4263158, 0.7615385, 2.15],
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        retargeter._apply_neutral_offsets(
-            np.asarray([-1.35, -0.785, 0.0], dtype=np.float32)
-        ),
+        retargeter._apply_neutral_offsets(np.asarray([-1.35, -0.785, 0.0], dtype=np.float32)),
         [-1.35, -0.785, 0.0],
         atol=1e-6,
     )

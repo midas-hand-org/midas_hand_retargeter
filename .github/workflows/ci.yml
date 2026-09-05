@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The default install: numpy only. This job is the guarantee that the
+  # analytic path never regrows a heavy dependency.
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]"
+      - name: No heavy dependency crept into the default install
+        run: |
+          python - <<'PY'
+          import sys, numpy, midas_hand_retargeter
+          heavy = [m for m in ("torch", "dex_retargeting", "pinocchio", "nlopt")
+                   if m in sys.modules]
+          assert not heavy, f"default import pulled {heavy}"
+          PY
+      - name: Retarget a frame with no URDF and no solver
+        run: |
+          python - <<'PY'
+          import numpy as np
+          from midas_hand_retargeter import MidasHandRetargeter
+          result = MidasHandRetargeter.create().retarget_landmarks(np.zeros((21, 3)))
+          assert len(result.active_joint_positions) == 13
+          PY
+      - run: pytest -q
+
+  # The optimizer modes. CPU torch only: --index-url, NOT --extra-index-url,
+  # which can silently resolve the CUDA wheel from PyPI instead.
+  optimizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: python -c "import torch; assert torch.version.cuda is None, 'resolved a CUDA build'"
+      - run: pip install -e ".[dev,vector]"
+      - run: pytest -q
+
+  # Catches "works only because everything is editable-installed here".
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install build && python -m build
+      - name: Install the wheel into a clean venv and smoke it
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/midas-retargeter-smoke
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .

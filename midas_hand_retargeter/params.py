@@ -27,8 +27,8 @@ a versioned schema means carrying them through every future migration.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
-from typing import Iterator, Mapping
 
 from .constants import FINGER_NAMES
 
@@ -145,7 +145,7 @@ class RetargetProfile:
     source: str = "vision"
 
     @classmethod
-    def from_legacy_tuning(cls, tuning) -> "RetargetProfile":
+    def from_legacy_tuning(cls, tuning) -> RetargetProfile:
         """Convert the flat 11-field ``RetargeterTuning`` into a profile.
 
         Applies each global gain to every finger, and folds the legacy shared
@@ -168,8 +168,9 @@ class RetargetProfile:
             cmc_roll_gain=tuning.thumb_cmc_gain * tuning.thumb_cmc_roll_gain,
             smoothing_alpha=tuning.thumb_smoothing_alpha,
         )
-        return cls(index=finger, middle=finger, ring=finger, thumb=thumb,
-                   name="legacy", source="legacy")
+        return cls(
+            index=finger, middle=finger, ring=finger, thumb=thumb, name="legacy", source="legacy"
+        )
 
     def finger(self, name: str) -> FingerParams:
         try:
@@ -184,7 +185,7 @@ class RetargetProfile:
             yield name, self.finger(name)
 
     # --- editing -------------------------------------------------------
-    def with_values(self, updates: Mapping[str, object]) -> "RetargetProfile":
+    def with_values(self, updates: Mapping[str, object]) -> RetargetProfile:
         """Return a copy with dotted-path ``updates`` applied.
 
         Paths look like ``"index.curl_gain"`` or ``"thumb.cmc_roll_span"``.
@@ -197,8 +198,7 @@ class RetargetProfile:
             section, _, field_name = str(path).partition(".")
             if not field_name:
                 raise KeyError(
-                    f"Parameter path {path!r} must be '<digit>.<field>', "
-                    f"e.g. 'index.curl_gain'"
+                    f"Parameter path {path!r} must be '<digit>.<field>', e.g. 'index.curl_gain'"
                 )
             if section not in _SECTION_TYPES:
                 raise KeyError(
@@ -225,9 +225,7 @@ class RetargetProfile:
             params = getattr(self, section)
             for field_name in _SECTION_FIELDS[section]:
                 value = getattr(params, field_name)
-                flat[f"{section}.{field_name}"] = (
-                    list(value) if isinstance(value, tuple) else value
-                )
+                flat[f"{section}.{field_name}"] = list(value) if isinstance(value, tuple) else value
         return flat
 
 

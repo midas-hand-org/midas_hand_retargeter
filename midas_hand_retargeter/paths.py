@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 def _candidate_roots(start: Path | None = None) -> Iterable[Path]:
@@ -45,8 +45,7 @@ def find_mujoco_repo(path: str | os.PathLike[str] | None = None) -> Path:
             return candidate.resolve()
 
     raise FileNotFoundError(
-        "Could not find midas_hand_mujoco. Pass mujoco_repo=... or set "
-        "MIDAS_HAND_MUJOCO_DIR."
+        "Could not find midas_hand_mujoco. Pass mujoco_repo=... or set MIDAS_HAND_MUJOCO_DIR."
     )
 
 

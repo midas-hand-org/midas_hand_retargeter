@@ -7,7 +7,6 @@ range becomes reachable. Both are pinned here.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from midas_hand_retargeter import MidasHandRetargeter

@@ -69,9 +69,7 @@ def test_unknown_mode_is_rejected():
 def test_coupling_mode_is_normalized_once():
     """config.py used to reject what adaptor.py accepted."""
 
-    assert MidasRetargeterConfig(coupling_mode="Fixed_Passive").coupling_mode == (
-        "fixed_passive"
-    )
+    assert MidasRetargeterConfig(coupling_mode="Fixed_Passive").coupling_mode == ("fixed_passive")
     with pytest.raises(ValueError, match="Unsupported coupling_mode"):
         MidasRetargeterConfig(coupling_mode="nope")
 
@@ -92,11 +90,13 @@ def test_analytic_matches_refine_exactly():
         left = analytic.retarget_landmarks(landmarks)
         right = refine.retarget_landmarks(landmarks)
         np.testing.assert_array_equal(
-            left.active_vector(), right.active_vector(),
+            left.active_vector(),
+            right.active_vector(),
             err_msg=f"active joints diverged on pose {name!r}",
         )
         np.testing.assert_array_equal(
-            np.asarray(left.robot_qpos), np.asarray(right.robot_qpos),
+            np.asarray(left.robot_qpos),
+            np.asarray(right.robot_qpos),
             err_msg=f"robot_qpos diverged on pose {name!r}",
         )
 
@@ -132,9 +132,7 @@ def test_analytic_needs_neither_dex_retargeting_nor_torch():
         "assert 'pinocchio' not in sys.modules, 'pinocchio was imported';"
         "print('clean')"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "clean" in result.stdout
 
@@ -150,9 +148,7 @@ def test_importing_adaptor_stays_dependency_free():
         "assert 'dex_retargeting' not in sys.modules;"
         "print(PIP_DIP_LOOKUP_MODE)"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "pip_dip_lookup" in result.stdout
 

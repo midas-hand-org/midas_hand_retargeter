@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 import numpy as np
 
@@ -13,9 +13,9 @@ from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
 from .coupling import FIXED_PASSIVE_MODE, LookupPassiveCoupling
 from .human import landmarks_to_vectors
 from .params import RetargetProfile
-from .postprocess import as_profile
 from .postprocess import (
     JointTargetFilter,
+    as_profile,
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
 )
@@ -82,8 +82,7 @@ class MidasHandRetargeter:
             # so no URDF, no pinocchio and no torch are needed.
             self.robot_joint_names = self._model.joint_names
             self.fixed_joint_names = tuple(
-                name for name in self.robot_joint_names
-                if name not in set(self.active_joint_names)
+                name for name in self.robot_joint_names if name not in set(self.active_joint_names)
             )
             if self.config.coupling_mode != FIXED_PASSIVE_MODE:
                 self._passive_coupling = LookupPassiveCoupling(
@@ -133,7 +132,7 @@ class MidasHandRetargeter:
             )
 
     @classmethod
-    def create(cls, **config_overrides) -> "MidasHandRetargeter":
+    def create(cls, **config_overrides) -> MidasHandRetargeter:
         """Construct from keyword overrides accepted by ``MidasRetargeterConfig``."""
 
         return cls(MidasRetargeterConfig(**config_overrides))
@@ -201,8 +200,7 @@ class MidasHandRetargeter:
 
         if self._retargeting is None:
             raise RuntimeError(
-                f"set_qpos() needs the optimizer, but mode={self.config.mode!r} "
-                "does not build one."
+                f"set_qpos() needs the optimizer, but mode={self.config.mode!r} does not build one."
             )
         self._retargeting.set_qpos(np.asarray(robot_qpos, dtype=np.float32))
 
@@ -216,9 +214,7 @@ class MidasHandRetargeter:
         # Order matters: SeqRetargeting.reset() sets last_qpos to the joint
         # mid-range, so restore the intended zero warm start afterwards.
         self._retargeting.reset()
-        self._retargeting.set_qpos(
-            np.zeros(len(self.robot_joint_names), dtype=np.float32)
-        )
+        self._retargeting.set_qpos(np.zeros(len(self.robot_joint_names), dtype=np.float32))
         if getattr(self._retargeting, "filter", None) is not None:
             self._retargeting.filter.reset()
 
@@ -347,13 +343,9 @@ class MidasHandRetargeter:
 
         joint_targets: dict[str, float] = {}
         if self.config.finger_postprocess:
-            joint_targets.update(
-                finger_joint_targets_from_landmarks(landmarks, profile)
-            )
+            joint_targets.update(finger_joint_targets_from_landmarks(landmarks, profile))
         if self.config.thumb_postprocess:
-            joint_targets.update(
-                thumb_joint_targets_from_landmarks(landmarks, profile)
-            )
+            joint_targets.update(thumb_joint_targets_from_landmarks(landmarks, profile))
         qpos = self._apply_joint_targets(robot_qpos, joint_targets, profile)
         return self._hold_disabled_joints(qpos, joint_targets)
 
@@ -409,9 +401,7 @@ class MidasHandRetargeter:
             qpos[joint_index] = self._clip_joint(joint_name, value)
         return qpos
 
-    def _postprocess_filter_alpha(
-        self, joint_name: str, profile: RetargetProfile
-    ) -> float | None:
+    def _postprocess_filter_alpha(self, joint_name: str, profile: RetargetProfile) -> float | None:
         """Low-pass alpha for one landmark-derived target, per digit."""
 
         if joint_name.startswith("thumb_"):
@@ -474,13 +464,9 @@ class MidasHandRetargeter:
 
     def _make_result(self, robot_qpos: np.ndarray, ref_vectors: np.ndarray) -> RetargetingResult:
         qpos_by_name = {
-            name: float(robot_qpos[index])
-            for index, name in enumerate(self.robot_joint_names)
+            name: float(robot_qpos[index]) for index, name in enumerate(self.robot_joint_names)
         }
-        active = {
-            name: qpos_by_name[name]
-            for name in self.active_joint_names
-        }
+        active = {name: qpos_by_name[name] for name in self.active_joint_names}
         hardware = np.asarray(
             [active[name] for name in HARDWARE_MOTOR_JOINT_NAMES],
             dtype=np.float32,

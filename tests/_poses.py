@@ -75,7 +75,7 @@ def hand_pose(
 
     kp = np.zeros((21, 3), dtype=np.float64)
 
-    for name, curl, splay in zip(("index", "middle", "ring"), curls, splays):
+    for name, curl, splay in zip(("index", "middle", "ring"), curls, splays, strict=True):
         root = _FINGER_ROOT_INDEX[name]
         for offset, point in enumerate(_chain(_FINGER_BASE[name], curl, splay)):
             kp[root + offset] = point
@@ -98,7 +98,7 @@ def hand_pose(
         step = math.cos(angle) * heading + math.sin(angle) * PALMAR
         points.append(points[-1] + SEGMENT * step)
         angle += extra * thumb_curl
-    for index, point in zip((1, 2, 3, 4), points):
+    for index, point in zip((1, 2, 3, 4), points, strict=True):
         kp[index] = point
 
     return kp
@@ -131,8 +131,9 @@ def _named_poses():
 
     # Curl+splay together: pins the curl-damping term on splay.
     for curl in (0.3, 0.8, 1.3):
-        yield f"splay_damped_by_curl_{curl:g}", hand_pose(
-            curls=(curl,) * 3, splays=(0.4, -0.4, 0.4)
+        yield (
+            f"splay_damped_by_curl_{curl:g}",
+            hand_pose(curls=(curl,) * 3, splays=(0.4, -0.4, 0.4)),
         )
 
     # Thumb axes, swept one at a time.
@@ -152,12 +153,15 @@ def _named_poses():
     # A few seeded pseudo-random poses in the plausible range, for breadth.
     rng = np.random.default_rng(20260904)
     for i in range(8):
-        yield f"random_{i}", hand_pose(
-            curls=tuple(rng.uniform(0.0, 1.4, 3)),
-            splays=tuple(rng.uniform(-0.45, 0.45, 3)),
-            thumb_curl=float(rng.uniform(0.0, 1.4)),
-            thumb_oppose=float(rng.uniform(0.0, 1.2)),
-            thumb_side=float(rng.uniform(-0.6, 0.6)),
+        yield (
+            f"random_{i}",
+            hand_pose(
+                curls=tuple(rng.uniform(0.0, 1.4, 3)),
+                splays=tuple(rng.uniform(-0.45, 0.45, 3)),
+                thumb_curl=float(rng.uniform(0.0, 1.4)),
+                thumb_oppose=float(rng.uniform(0.0, 1.2)),
+                thumb_side=float(rng.uniform(-0.6, 0.6)),
+            ),
         )
 
 

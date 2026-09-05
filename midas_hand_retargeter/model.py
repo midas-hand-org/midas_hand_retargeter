@@ -60,7 +60,7 @@ class HandModel:
     joint_limits: np.ndarray  # (n, 2) float64, [lower, upper]
 
     @classmethod
-    def right(cls) -> "HandModel":
+    def right(cls) -> HandModel:
         """The shipped right-hand model, from the checked-in table."""
 
         names = tuple(name for name, _, _ in MIDAS_RIGHT_JOINTS)
@@ -69,7 +69,7 @@ class HandModel:
         return cls(joint_names=names, joint_limits=limits)
 
     @classmethod
-    def from_urdf(cls, urdf_path, *, joint_order=None) -> "HandModel":
+    def from_urdf(cls, urdf_path, *, joint_order=None) -> HandModel:
         """Parse revolute joint limits from a URDF using only the stdlib.
 
         ``joint_order`` defaults to this module's canonical order; pass an
@@ -89,8 +89,10 @@ class HandModel:
             name = joint.get("name")
             parsed[name] = (float(limit.get("lower")), float(limit.get("upper")))
 
-        order = tuple(joint_order) if joint_order is not None else tuple(
-            name for name, _, _ in MIDAS_RIGHT_JOINTS
+        order = (
+            tuple(joint_order)
+            if joint_order is not None
+            else tuple(name for name, _, _ in MIDAS_RIGHT_JOINTS)
         )
         missing = [name for name in order if name not in parsed]
         if missing:

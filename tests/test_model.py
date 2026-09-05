@@ -55,7 +55,9 @@ def test_table_matches_shipped_mjcf_joint_ranges():
     for name in MIDAS_RIGHT_HAND.joint_names:
         assert name in ranges, f"{name} missing from MJCF"
         np.testing.assert_allclose(
-            ranges[name], MIDAS_RIGHT_HAND.limits(name), atol=1e-9,
+            ranges[name],
+            MIDAS_RIGHT_HAND.limits(name),
+            atol=1e-9,
             err_msg=f"MJCF range for {name} drifted from the table",
         )
 

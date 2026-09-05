@@ -57,7 +57,7 @@ def _nontrivial_hand():
     for extra in (0.9 * 0.5, 0.6 * 0.5, 0.0):
         pts.append(pts[-1] + _SEG * (math.cos(angle) * heading + math.sin(angle) * _PALMAR))
         angle += extra
-    for idx, pt in zip((1, 2, 3, 4), pts):
+    for idx, pt in zip((1, 2, 3, 4), pts, strict=True):
         kp[idx] = pt
     return kp
 

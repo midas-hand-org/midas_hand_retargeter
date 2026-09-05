@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
 
-from .coupling import FIXED_PASSIVE_MODE, normalize_coupling_mode
 from .constants import (
     ACTIVE_JOINT_NAMES,
     DEFAULT_TARGET_LINK_HUMAN_INDICES,
     DEFAULT_TARGET_ORIGIN_LINK_NAMES,
     DEFAULT_TARGET_TASK_LINK_NAMES,
 )
+from .coupling import FIXED_PASSIVE_MODE, normalize_coupling_mode
 from .model import MIDAS_RIGHT_HAND, HandModel
 from .paths import default_urdf_path
 from .tuning import RetargeterTuning
@@ -34,9 +34,7 @@ SUPPORTED_RETARGET_MODES = (ANALYTIC_MODE, VECTOR_MODE, REFINE_MODE)
 def normalize_retarget_mode(mode: str) -> str:
     normalized = str(mode).lower()
     if normalized not in SUPPORTED_RETARGET_MODES:
-        raise ValueError(
-            f"Unsupported mode={mode!r}. Expected one of {SUPPORTED_RETARGET_MODES}."
-        )
+        raise ValueError(f"Unsupported mode={mode!r}. Expected one of {SUPPORTED_RETARGET_MODES}.")
     return normalized
 
 
@@ -99,17 +97,13 @@ class MidasRetargeterConfig:
         # Frozen dataclass: normalize through object.__setattr__ so the
         # canonical value is stored once instead of re-derived at each use.
         object.__setattr__(self, "mode", normalize_retarget_mode(self.mode))
-        object.__setattr__(
-            self, "coupling_mode", normalize_coupling_mode(self.coupling_mode)
-        )
+        object.__setattr__(self, "coupling_mode", normalize_coupling_mode(self.coupling_mode))
 
         if self.mode == VECTOR_MODE and (self.thumb_postprocess or self.finger_postprocess):
             object.__setattr__(self, "thumb_postprocess", False)
             object.__setattr__(self, "finger_postprocess", False)
 
-        if self.mode == ANALYTIC_MODE and not (
-            self.thumb_postprocess and self.finger_postprocess
-        ):
+        if self.mode == ANALYTIC_MODE and not (self.thumb_postprocess and self.finger_postprocess):
             disabled = [
                 name
                 for name, on in (
@@ -147,9 +141,7 @@ class MidasRetargeterConfig:
             "target_joint_names": list(self.target_joint_names),
             "target_origin_link_names": list(self.target_origin_link_names),
             "target_task_link_names": list(self.target_task_link_names),
-            "target_link_human_indices": [
-                list(row) for row in self.target_link_human_indices
-            ],
+            "target_link_human_indices": [list(row) for row in self.target_link_human_indices],
             "scaling_factor": float(self.scaling_factor),
             "normal_delta": float(self.normal_delta),
             "huber_delta": float(self.huber_delta),

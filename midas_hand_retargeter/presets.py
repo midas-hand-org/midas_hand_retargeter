@@ -12,8 +12,8 @@ saved.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .model import MIDAS_RIGHT_HAND, HandModel
 from .params import RetargetProfile
@@ -65,14 +65,12 @@ def _validate_ranges(profile: RetargetProfile, model: HandModel) -> None:
         for value in getattr(thumb, field_name):
             if not (lower - 1e-9 <= value <= upper + 1e-9):
                 problems.append(
-                    f"thumb.{field_name} value {value} outside "
-                    f"{joint} limits [{lower}, {upper}]"
+                    f"thumb.{field_name} value {value} outside {joint} limits [{lower}, {upper}]"
                 )
 
     if problems:
         raise ValueError(
-            "Profile would command outside the robot's joint limits:\n  "
-            + "\n  ".join(problems)
+            "Profile would command outside the robot's joint limits:\n  " + "\n  ".join(problems)
         )
 
 

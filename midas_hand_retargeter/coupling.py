@@ -23,10 +23,10 @@ Two coupling modes are supported:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -51,8 +51,7 @@ def normalize_coupling_mode(mode: str) -> str:
     normalized = str(mode).lower()
     if normalized not in SUPPORTED_COUPLING_MODES:
         raise ValueError(
-            f"Unsupported coupling_mode={mode!r}. "
-            f"Expected one of {SUPPORTED_COUPLING_MODES}."
+            f"Unsupported coupling_mode={mode!r}. Expected one of {SUPPORTED_COUPLING_MODES}."
         )
     return normalized
 
@@ -97,9 +96,7 @@ def load_default_lookup(lookup_path: str | Path | None = None):
     if lookup_path is not None:
         return PipDipLookup.from_csv(Path(lookup_path).expanduser().resolve())
 
-    resource = resources.files("midas_hand_api").joinpath(
-        "assets", "pip_dip_linkage_lookup.csv"
-    )
+    resource = resources.files("midas_hand_api").joinpath("assets", "pip_dip_linkage_lookup.csv")
     with resources.as_file(resource) as path:
         return PipDipLookup.from_csv(path)
 
@@ -159,12 +156,8 @@ class LookupPassiveCoupling:
         self.couplings = couplings_for(finger_names)
 
         index_of = _joint_index_resolver(model)
-        self.idx_pip = np.asarray(
-            [index_of(c.pip_joint_name) for c in self.couplings], dtype=int
-        )
-        self.idx_dip = np.asarray(
-            [index_of(c.dip_joint_name) for c in self.couplings], dtype=int
-        )
+        self.idx_pip = np.asarray([index_of(c.pip_joint_name) for c in self.couplings], dtype=int)
+        self.idx_dip = np.asarray([index_of(c.dip_joint_name) for c in self.couplings], dtype=int)
         self.idx_linkage = np.asarray(
             [index_of(c.linkage_joint_name) for c in self.couplings], dtype=int
         )

@@ -38,7 +38,7 @@ gains and bend normalizers first.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -84,9 +84,7 @@ def landmarks_to_vectors(
     points = as_landmarks(landmarks)
     indices = np.asarray(target_link_human_indices, dtype=np.int64)
     if indices.ndim != 2 or indices.shape[0] != 2:
-        raise ValueError(
-            "target_link_human_indices must have shape (2, num_vectors)"
-        )
+        raise ValueError("target_link_human_indices must have shape (2, num_vectors)")
     origin_indices = indices[0]
     task_indices = indices[1]
     return points[task_indices] - points[origin_indices]
@@ -129,9 +127,7 @@ def mediapipe_world_to_mano_landmarks(
     keypoints = as_landmarks(world_landmarks)
     centered = keypoints - keypoints[0:1, :]
     wrist_frame = estimate_frame_from_hand_points(centered)
-    operator2mano = (
-        OPERATOR2MANO_RIGHT if hand_type.lower() == "right" else OPERATOR2MANO_LEFT
-    )
+    operator2mano = OPERATOR2MANO_RIGHT if hand_type.lower() == "right" else OPERATOR2MANO_LEFT
     return (centered @ wrist_frame @ operator2mano).astype(np.float32)
 
 

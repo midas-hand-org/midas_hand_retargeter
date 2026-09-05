@@ -14,9 +14,9 @@ import would make torch a hard import-time dependency of the whole package.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -30,10 +30,11 @@ from .coupling import (
     LookupPassiveCoupling,
     PipDipJointCoupling,
     couplings_for,
-    load_default_lookup,
     normalize_coupling_mode,
 )
 
+# ruff: noqa: F822 - MidasCoupledKinematicAdaptor is resolved lazily by the
+# module __getattr__ below, so it is exported but not defined at module level.
 __all__ = [
     "COUPLED_PIP_DIP_MODE",
     "FIXED_PASSIVE_MODE",
@@ -130,10 +131,7 @@ def _coupled_adaptor_class():
             self.idx_pin2dip = self._coupling.idx_dip
             self.idx_pin2linkage = self._coupling.idx_linkage
             self.idx_target2pip = np.asarray(
-                [
-                    self.target_joint_names.index(c.pip_joint_name)
-                    for c in self.couplings
-                ],
+                [self.target_joint_names.index(c.pip_joint_name) for c in self.couplings],
                 dtype=int,
             )
 
@@ -155,8 +153,7 @@ def _coupled_adaptor_class():
 
             for coupling_index, target_index in enumerate(self.idx_target2pip):
                 target_jacobian[..., target_index] += (
-                    jacobian[..., self.idx_pin2dip[coupling_index]]
-                    * dip_gain[coupling_index]
+                    jacobian[..., self.idx_pin2dip[coupling_index]] * dip_gain[coupling_index]
                 )
                 target_jacobian[..., target_index] += (
                     jacobian[..., self.idx_pin2linkage[coupling_index]]
