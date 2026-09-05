@@ -188,6 +188,7 @@ class MidasHandRetargeter:
         self._last_uncalibrated_active_joint_positions = self._active_positions_from_qpos(
             robot_qpos
         )
+        self._sync_optimizer_warm_start(robot_qpos)
         robot_qpos = self._apply_neutral_offsets(robot_qpos)
         robot_qpos = self._apply_kinematic_adaptor(robot_qpos)
         return self._make_result(robot_qpos, vectors)
@@ -251,6 +252,27 @@ class MidasHandRetargeter:
             if name in self._last_uncalibrated_active_joint_positions
         }
         return self.neutral_joint_offsets
+
+    def _sync_optimizer_warm_start(self, robot_qpos: np.ndarray) -> None:
+        """Anchor the solver's temporal regularizer to the commanded pose.
+
+        ``SeqRetargeting.retarget`` stores its own raw solution as
+        ``last_qpos``, which the ``normal_delta`` regularizer then penalizes
+        deviation from. But in ``refine`` mode the analytic layer overwrites
+        every actuated joint afterwards, so the solver was being pulled toward
+        a pose that was never commanded — measured up to 1.5 rad away over a
+        normal closing sweep.
+
+        Sync from the post-analytic, PRE-neutral vector: that is the pose
+        actually sent, expressed in solver space. Neutral recentering is an
+        operator-facing remap that corresponds to no physical human pose, so
+        feeding it back would anchor the regularizer to something nobody is
+        holding.
+        """
+
+        if self._retargeting is None:
+            return
+        self._retargeting.set_qpos(np.asarray(robot_qpos, dtype=np.float32))
 
     def _build_fixed_qpos(self) -> np.ndarray:
         return np.asarray(

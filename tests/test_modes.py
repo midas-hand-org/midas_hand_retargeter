@@ -155,3 +155,28 @@ def test_importing_adaptor_stays_dependency_free():
     )
     assert result.returncode == 0, result.stderr
     assert "pip_dip_lookup" in result.stdout
+
+
+@needs_optimizer
+def test_refine_warm_start_tracks_the_commanded_pose():
+    """The temporal regularizer must anchor to what was actually commanded.
+
+    SeqRetargeting stores its own raw solve as last_qpos, but the analytic
+    layer then overwrites every actuated joint, so the solver used to be pulled
+    toward a pose that never reached the hand (measured 1.5 rad off over a
+    closing sweep).
+    """
+
+    from ._poses import hand_pose
+
+    retargeter = MidasHandRetargeter.create(mode=REFINE_MODE)
+    worst = 0.0
+    for step in range(20):
+        amount = 1.4 * step / 19
+        result = retargeter.retarget_landmarks(
+            hand_pose(curls=(amount,) * 3, thumb_curl=amount, thumb_oppose=0.9 * amount)
+        )
+        warm_start = np.asarray(retargeter.dex_retargeting.last_qpos, dtype=float)
+        worst = max(worst, float(np.abs(warm_start - result.active_vector()).max()))
+
+    assert worst < 1e-6, f"warm start drifted {worst:.4f} rad from the command"
