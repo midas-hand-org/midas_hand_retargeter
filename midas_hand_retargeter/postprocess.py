@@ -20,7 +20,20 @@ import numpy as np
 
 from .constants import FINGER_NAMES
 from .human import as_landmarks
+from .params import DEFAULT_PROFILE, FingerParams, RetargetProfile, ThumbParams
 from .tuning import DEFAULT_TUNING, RetargeterTuning
+
+
+def as_profile(tuning) -> RetargetProfile:
+    """Accept either a RetargetProfile or a legacy flat RetargeterTuning."""
+
+    if isinstance(tuning, RetargetProfile):
+        return tuning
+    if isinstance(tuning, RetargeterTuning):
+        return RetargetProfile.from_legacy_tuning(tuning)
+    raise TypeError(
+        f"Expected RetargetProfile or RetargeterTuning, got {type(tuning).__name__}"
+    )
 
 
 # MediaPipe hand landmark groups for the three robot fingers. Each tuple is
@@ -87,7 +100,7 @@ class JointTargetFilter:
 
 def finger_joint_targets_from_landmarks(
     landmarks: np.ndarray,
-    tuning: RetargeterTuning = DEFAULT_TUNING,
+    tuning: RetargetProfile | RetargeterTuning = DEFAULT_PROFILE,
 ) -> dict[str, float]:
     """Map human finger landmarks to active MIDAS finger joint targets.
 
@@ -100,32 +113,26 @@ def finger_joint_targets_from_landmarks(
     ``RetargeterTuning`` only applies broad curl/ab-ad gains and smoothing.
     """
 
+    profile = as_profile(tuning)
     points = as_landmarks(landmarks)
     targets: dict[str, float] = {}
     for finger in FINGER_NAMES:
+        params = profile.finger(finger)
+        if not params.enabled:
+            continue  # hold last command; the caller keeps the previous value
         indices = FINGER_LANDMARKS[finger]
-        curl = _finger_curl(points, indices, tuning)
+        curl = _finger_curl(points, indices, params)
         targets[f"{finger}_mcp_abad_joint"] = _finger_splay(
-            points,
-            finger,
-            indices,
-            tuning,
-            curl,
+            points, indices, params, curl
         )
-        targets[f"{finger}_mcp_pitch_joint"] = _blend(
-            *FINGER_MCP_PITCH_RANGE,
-            curl,
-        )
-        targets[f"{finger}_pip_joint"] = _blend(
-            *FINGER_PIP_RANGE,
-            curl,
-        )
+        targets[f"{finger}_mcp_pitch_joint"] = _blend(*params.mcp_pitch_range, curl)
+        targets[f"{finger}_pip_joint"] = _blend(*params.pip_range, curl)
     return targets
 
 
 def thumb_joint_targets_from_landmarks(
     landmarks: np.ndarray,
-    tuning: RetargeterTuning = DEFAULT_TUNING,
+    tuning: RetargetProfile | RetargeterTuning = DEFAULT_PROFILE,
 ) -> dict[str, float]:
     """Map human thumb landmarks to active MIDAS thumb joint targets.
 
@@ -136,6 +143,9 @@ def thumb_joint_targets_from_landmarks(
     - CMC side uses thumb-only in-plane side sweep.
     """
 
+    params = as_profile(tuning).thumb
+    if not params.enabled:
+        return {}
     points = as_landmarks(landmarks)
     cmc, mcp, ip, tip = (points[index] for index in THUMB_LANDMARKS)
 
@@ -145,10 +155,10 @@ def thumb_joint_targets_from_landmarks(
     mcp_bend = _angle_between(cmc_to_mcp, mcp_to_ip)
     dip_bend = _angle_between(mcp_to_ip, ip_to_tip)
 
-    mcp_curl = _smoothstep(tuning.thumb_flexion_gain * mcp_bend / tuning.thumb_mcp_max_bend)
+    mcp_curl = _smoothstep(params.flexion_gain * mcp_bend / params.mcp_max_bend)
     dip_curl = max(
-        _smoothstep(tuning.thumb_flexion_gain * dip_bend / tuning.thumb_dip_max_bend),
-        THUMB_DIP_MCP_FOLLOW * mcp_curl,
+        _smoothstep(params.flexion_gain * dip_bend / params.dip_max_bend),
+        params.dip_follows_mcp * mcp_curl,
     )
 
     palm_forward, palm_lateral, palm_normal = _palm_basis(points)
@@ -161,13 +171,10 @@ def thumb_joint_targets_from_landmarks(
         palm_lateral,
     )
     side_delta = _deadzone(
-        side_angle - THUMB_CMC_SIDE_NEUTRAL_ANGLE,
-        THUMB_CMC_SIDE_DEADZONE,
+        side_angle - params.cmc_side_neutral_angle,
+        params.cmc_side_deadzone,
     )
-    side_gain = tuning.thumb_cmc_gain * tuning.thumb_cmc_side_gain
-    side_target = THUMB_CMC_SIDE_OPEN - (
-        side_gain * side_delta
-    )
+    side_target = params.cmc_side_open - (params.cmc_side_gain * side_delta)
 
     opposition_angle = _signed_angle_out_of_plane(
         thumb_direction,
@@ -176,40 +183,25 @@ def thumb_joint_targets_from_landmarks(
         palm_normal,
     )
     roll_angle = abs(opposition_angle)
-    roll_gain = tuning.thumb_cmc_gain * tuning.thumb_cmc_roll_gain
     opposition = _smoothstep(
-        roll_gain
-        * (roll_angle - THUMB_CMC_ROLL_DEADZONE)
-        / THUMB_CMC_ROLL_SPAN
+        params.cmc_roll_gain
+        * (roll_angle - params.cmc_roll_deadzone)
+        / params.cmc_roll_span
     )
     opposition = float(np.clip(opposition, 0.0, 1.0))
 
     return {
-        "thumb_cmc_roll_joint": _blend(
-            *THUMB_CMC_ROLL_RANGE,
-            opposition,
-        ),
-        "thumb_cmc_side_joint": float(
-            np.clip(
-                side_target,
-                *THUMB_CMC_SIDE_RANGE,
-            )
-        ),
-        "thumb_mcp_joint": _blend(
-            *THUMB_MCP_RANGE,
-            mcp_curl,
-        ),
-        "thumb_dip_joint": _blend(
-            *THUMB_DIP_RANGE,
-            dip_curl,
-        ),
+        "thumb_cmc_roll_joint": _blend(*params.cmc_roll_range, opposition),
+        "thumb_cmc_side_joint": float(np.clip(side_target, *params.cmc_side_range)),
+        "thumb_mcp_joint": _blend(*params.mcp_range, mcp_curl),
+        "thumb_dip_joint": _blend(*params.dip_range, dip_curl),
     }
 
 
 def _finger_curl(
     points: np.ndarray,
     indices: tuple[int, int, int, int],
-    tuning: RetargeterTuning,
+    params: FingerParams,
 ) -> float:
     """Estimate a normalized 0..1 curl amount for one finger."""
 
@@ -227,15 +219,14 @@ def _finger_curl(
 
     pip_bend = _angle_between(proximal, middle)
     dip_bend = _angle_between(middle, distal)
-    bend = 0.62 * pip_bend + 0.38 * dip_bend
-    return _smoothstep(tuning.finger_curl_gain * bend / tuning.finger_curl_max_bend)
+    bend = params.curl_pip_weight * pip_bend + params.curl_dip_weight * dip_bend
+    return _smoothstep(params.curl_gain * bend / params.curl_max_bend)
 
 
 def _finger_splay(
     points: np.ndarray,
-    finger: str,
     indices: tuple[int, int, int, int],
-    tuning: RetargeterTuning,
+    params: FingerParams,
     curl: float,
 ) -> float:
     """Estimate MCP ab/ad from palm-local lateral finger direction.
@@ -255,13 +246,13 @@ def _finger_splay(
     lateral = float(np.dot(in_palm_direction, palm_lateral))
     lateral_angle = float(np.arctan2(lateral, forward))
 
-    splay = _deadzone(lateral_angle, FINGER_ABAD_DEADZONE)
-    curl_damping = 1.0 - FINGER_ABAD_CURL_DAMPING * float(np.clip(curl, 0.0, 1.0))
+    splay = _deadzone(lateral_angle, params.splay_deadzone)
+    curl_damping = 1.0 - params.splay_curl_damping * float(np.clip(curl, 0.0, 1.0))
     return float(
         np.clip(
-            curl_damping * tuning.finger_abad_gain * FINGER_ABAD_SCALE * splay,
-            -FINGER_ABAD_LIMIT,
-            FINGER_ABAD_LIMIT,
+            curl_damping * params.splay_gain * splay,
+            -params.splay_limit,
+            params.splay_limit,
         )
     )
 

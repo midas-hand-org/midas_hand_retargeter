@@ -30,7 +30,15 @@ from .coupling import (
     SUPPORTED_COUPLING_MODES,
 )
 from .model import MIDAS_RIGHT_HAND, HandModel
+from .params import (
+    DEFAULT_PROFILE,
+    PARAMETER_COUNT,
+    FingerParams,
+    RetargetProfile,
+    ThumbParams,
+)
 from .retargeter import MidasHandRetargeter, RetargetingResult
+from .store import ProfileStore
 from .tuning import (
     DEFAULT_TUNING,
     PROFILES,
@@ -44,6 +52,7 @@ __version__ = "0.2.0"
 
 __all__ = [
     "ANALYTIC_MODE",
+    "DEFAULT_PROFILE",
     "DEFAULT_TUNING",
     "FIXED_PASSIVE_MODE",
     "MIDAS_RIGHT_HAND",
@@ -53,11 +62,16 @@ __all__ = [
     "SUPPORTED_COUPLING_MODES",
     "SUPPORTED_RETARGET_MODES",
     "VECTOR_MODE",
+    "PARAMETER_COUNT",
+    "FingerParams",
     "HandModel",
     "MidasHandRetargeter",
     "MidasRetargeterConfig",
     "RetargetingResult",
+    "ProfileStore",
+    "RetargetProfile",
     "RetargeterTuning",
+    "ThumbParams",
     "__version__",
     "glove_tuning",
     "tuning_for_source",

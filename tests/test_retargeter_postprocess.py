@@ -8,6 +8,7 @@ from midas_hand_retargeter.postprocess import (
 )
 from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
 from midas_hand_retargeter.model import HandModel
+from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.retargeter import MidasHandRetargeter
 from midas_hand_retargeter.tuning import RetargeterTuning
 
@@ -189,11 +190,8 @@ def test_thumb_cmc_side_and_roll_gains_are_independent():
 
 def test_postprocess_filter_alpha_covers_landmark_targets():
     retargeter = object.__new__(MidasHandRetargeter)
-    retargeter.config = SimpleNamespace(
-        tuning=RetargeterTuning(
-            finger_smoothing_alpha=0.12,
-            thumb_smoothing_alpha=0.34,
-        )
+    profile = RetargetProfile.from_legacy_tuning(
+        RetargeterTuning(finger_smoothing_alpha=0.12, thumb_smoothing_alpha=0.34)
     )
 
     for joint_name in (
@@ -203,7 +201,7 @@ def test_postprocess_filter_alpha_covers_landmark_targets():
         "middle_mcp_pitch_joint",
         "ring_pip_joint",
     ):
-        assert retargeter._postprocess_filter_alpha(joint_name) == 0.12
+        assert retargeter._postprocess_filter_alpha(joint_name, profile) == 0.12
 
     for joint_name in (
         "thumb_cmc_roll_joint",
@@ -211,7 +209,24 @@ def test_postprocess_filter_alpha_covers_landmark_targets():
         "thumb_mcp_joint",
         "thumb_dip_joint",
     ):
-        assert retargeter._postprocess_filter_alpha(joint_name) == 0.34
+        assert retargeter._postprocess_filter_alpha(joint_name, profile) == 0.34
+
+
+def test_postprocess_filter_alpha_is_per_finger():
+    """Each finger now carries its own alpha; they must not bleed together."""
+
+    retargeter = object.__new__(MidasHandRetargeter)
+    profile = RetargetProfile().with_values(
+        {
+            "index.smoothing_alpha": 0.1,
+            "middle.smoothing_alpha": 0.5,
+            "ring.smoothing_alpha": 0.9,
+        }
+    )
+    assert retargeter._postprocess_filter_alpha("index_pip_joint", profile) == 0.1
+    assert retargeter._postprocess_filter_alpha("middle_pip_joint", profile) == 0.5
+    assert retargeter._postprocess_filter_alpha("ring_mcp_abad_joint", profile) == 0.9
+    assert retargeter._postprocess_filter_alpha("no_such_joint", profile) is None
 
 
 def test_hardware_motor_order_maps_thumb_cmc_roll_to_motor_id_3():

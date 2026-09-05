@@ -12,6 +12,8 @@ from .config import MidasRetargeterConfig
 from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
 from .coupling import FIXED_PASSIVE_MODE, LookupPassiveCoupling
 from .human import landmarks_to_vectors
+from .params import RetargetProfile
+from .postprocess import as_profile
 from .postprocess import (
     JointTargetFilter,
     finger_joint_targets_from_landmarks,
@@ -93,6 +95,7 @@ class MidasHandRetargeter:
             name: index for index, name in enumerate(self.robot_joint_names)
         }
         self._fixed_qpos = self._build_fixed_qpos()
+        self._profile = as_profile(self.config.tuning)
         self._postprocess_filter = JointTargetFilter()
         self._neutral_joint_offsets: dict[str, float] = {}
         self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
@@ -220,6 +223,30 @@ class MidasHandRetargeter:
             self._retargeting.filter.reset()
 
     @property
+    def profile(self) -> RetargetProfile:
+        """The live analytic tuning profile."""
+
+        return self._profile
+
+    @profile.setter
+    def profile(self, profile: RetargetProfile) -> None:
+        """Swap the whole profile atomically, for live tuning.
+
+        Assigning one frozen object means a concurrent reader sees either the
+        old profile or the new one, never a mix of fields.
+        """
+
+        self._profile = as_profile(profile)
+
+    def set_neutral_offsets(self, offsets: Mapping[str, float]) -> None:
+        """Restore a saved neutral calibration (e.g. from a preset)."""
+
+        unknown = set(offsets) - set(self._joint_index_by_name)
+        if unknown:
+            raise KeyError(f"Unknown joints in neutral offsets: {sorted(unknown)}")
+        self._neutral_joint_offsets = {k: float(v) for k, v in offsets.items()}
+
+    @property
     def neutral_joint_offsets(self) -> dict[str, float]:
         """Return raw active-joint targets captured as the neutral command pose."""
 
@@ -314,21 +341,53 @@ class MidasHandRetargeter:
         thumb opposition. Tune it through ``RetargeterTuning``.
         """
 
+        # Read the live profile exactly once per frame and thread it through,
+        # so a concurrent tuning edit cannot change parameters mid-frame.
+        profile = self._profile
+
         joint_targets: dict[str, float] = {}
         if self.config.finger_postprocess:
             joint_targets.update(
-                finger_joint_targets_from_landmarks(landmarks, self.config.tuning)
+                finger_joint_targets_from_landmarks(landmarks, profile)
             )
         if self.config.thumb_postprocess:
             joint_targets.update(
-                thumb_joint_targets_from_landmarks(landmarks, self.config.tuning)
+                thumb_joint_targets_from_landmarks(landmarks, profile)
             )
-        return self._apply_joint_targets(robot_qpos, joint_targets)
+        qpos = self._apply_joint_targets(robot_qpos, joint_targets, profile)
+        return self._hold_disabled_joints(qpos, joint_targets)
+
+    def _hold_disabled_joints(
+        self,
+        robot_qpos: np.ndarray,
+        joint_targets: Mapping[str, float],
+    ) -> np.ndarray:
+        """Freeze digits whose params are disabled at their last command.
+
+        A disabled digit emits no target. Without this it would fall through to
+        the zero-initialised qpos and command 0.0 rad - flinging the finger
+        fully open mid-teleop, which on hardware is a real and surprising
+        motion. Held values bypass the smoothing filter: they are not new
+        measurements.
+        """
+
+        previous = self._last_uncalibrated_active_joint_positions
+        if not previous:
+            return robot_qpos
+        qpos = robot_qpos
+        for name in self.active_joint_names:
+            if name in joint_targets or name not in previous:
+                continue
+            index = self._joint_index_by_name.get(name)
+            if index is not None:
+                qpos[index] = previous[name]
+        return qpos
 
     def _apply_joint_targets(
         self,
         robot_qpos: np.ndarray,
         joint_targets: Mapping[str, float],
+        profile: RetargetProfile,
     ) -> np.ndarray:
         qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
         for joint_name, value in joint_targets.items():
@@ -340,7 +399,7 @@ class MidasHandRetargeter:
                     sorted(self._joint_index_by_name),
                 )
                 continue
-            filter_alpha = self._postprocess_filter_alpha(joint_name)
+            filter_alpha = self._postprocess_filter_alpha(joint_name, profile)
             if filter_alpha is not None:
                 value = self._postprocess_filter.update(
                     joint_name,
@@ -350,22 +409,16 @@ class MidasHandRetargeter:
             qpos[joint_index] = self._clip_joint(joint_name, value)
         return qpos
 
-    def _postprocess_filter_alpha(self, joint_name: str) -> float | None:
-        """Return the low-pass alpha for landmark-derived postprocess targets."""
+    def _postprocess_filter_alpha(
+        self, joint_name: str, profile: RetargetProfile
+    ) -> float | None:
+        """Low-pass alpha for one landmark-derived target, per digit."""
 
-        if joint_name.endswith((
-            "_mcp_abad_joint",
-            "_mcp_pitch_joint",
-            "_pip_joint",
-        )):
-            return self.config.tuning.finger_smoothing_alpha
-        if joint_name in {
-            "thumb_cmc_roll_joint",
-            "thumb_cmc_side_joint",
-            "thumb_mcp_joint",
-            "thumb_dip_joint",
-        }:
-            return self.config.tuning.thumb_smoothing_alpha
+        if joint_name.startswith("thumb_"):
+            return profile.thumb.smoothing_alpha
+        finger, _, _ = joint_name.partition("_")
+        if joint_name.endswith(("_mcp_abad_joint", "_mcp_pitch_joint", "_pip_joint")):
+            return profile.finger(finger).smoothing_alpha
         return None
 
     def _clip_joint(self, joint_name: str, value: float) -> float:
