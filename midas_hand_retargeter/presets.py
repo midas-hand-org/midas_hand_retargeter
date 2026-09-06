@@ -137,12 +137,27 @@ def save(
     return destination
 
 
+def resolve(name_or_path: str | Path, *, directory: str | Path = DEFAULT_PRESET_DIR) -> Path:
+    """Turn a preset NAME or a path into a path.
+
+    The browser has always addressed presets by bare name while ``--preset``
+    required a full path, so the name shown in the UI after saving was not the
+    thing you could then type on the command line. Both go through here.
+    """
+
+    candidate = Path(name_or_path).expanduser()
+    if candidate.suffix == ".json" or candidate.is_absolute() or len(candidate.parts) > 1:
+        return candidate
+    return Path(directory).expanduser() / f"{candidate.name}.json"
+
+
 def load(
     path: str | Path, *, model: HandModel = MIDAS_RIGHT_HAND
 ) -> tuple[RetargetProfile, dict[str, float]]:
-    source = Path(path).expanduser()
+    source = resolve(path)
     if not source.exists():
-        raise FileNotFoundError(f"No such preset: {source}")
+        available = ", ".join(p.stem for p in list_presets()) or "none saved"
+        raise FileNotFoundError(f"No such preset: {source} (available: {available})")
     return from_dict(json.loads(source.read_text()), model=model)
 
 
