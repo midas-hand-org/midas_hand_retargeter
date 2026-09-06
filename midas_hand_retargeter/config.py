@@ -93,6 +93,12 @@ class MidasRetargeterConfig:
     # source URDF and are injected by ``urdf.with_tip_links``; their offsets
     # are CAD estimates, and in this mode they are load-bearing because the
     # solver aims at them directly. Measure them on the real hand.
+    # DexPilot compares 3D vectors against the robot's own frame, so unlike
+    # every other mode it is orientation-sensitive. Re-expressing the input in
+    # the operator's palm basis makes it frame-invariant; disable only if you
+    # are feeding landmarks already in the robot's palm frame.
+    palm_frame_input: bool = True
+
     wrist_link_name: str = "palm_base"
     finger_tip_link_names: Sequence[str] = (
         "thumb_tip",

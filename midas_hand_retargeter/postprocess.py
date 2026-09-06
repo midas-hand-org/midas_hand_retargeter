@@ -379,3 +379,30 @@ def analytic_debug(
         "normal": [float(v) for v in normal],
     }
     return debug
+
+
+def landmarks_to_palm_frame(landmarks: np.ndarray) -> np.ndarray:
+    """Re-express landmarks in the hand's own palm basis, wrist at the origin.
+
+    The analytic layer builds this basis internally and is therefore invariant
+    to the input frame. The DexPilot optimizer is not: it compares 3D vectors
+    against the robot's palm frame directly, so raw glove landmarks — measured
+    against the Manus frame, where the hand points along +Z — ask the robot to
+    point its fingers 90 degrees away from where they extend (+Y). The solver
+    responds by railing abduction and giving up on curl. Measured on a live
+    glove: 3 of 13 joints pinned at their limits, index_mcp_abad stuck at
+    +0.791 of a +0.79 range, with every curl joint at 0.
+
+    Output axes match the robot's palm frame: X lateral (index->ring), Y
+    forward (wrist->middle MCP), Z palm normal. Applying this makes DexPilot
+    frame-invariant like the analytic layer, which is what we want for a
+    hand-only robot: how the operator holds their wrist should not be read as
+    finger articulation. Wrist pose belongs to the arm, not the fingers.
+    """
+
+    points = as_landmarks(landmarks)
+    relative = points - points[0]
+    forward, lateral, normal = _palm_basis(points)
+    return np.stack(
+        [relative @ lateral, relative @ forward, relative @ normal], axis=1
+    ).astype(np.float64)

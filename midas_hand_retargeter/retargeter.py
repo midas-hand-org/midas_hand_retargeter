@@ -17,6 +17,7 @@ from .postprocess import (
     JointTargetFilter,
     as_profile,
     finger_joint_targets_from_landmarks,
+    landmarks_to_palm_frame,
     thumb_joint_targets_from_landmarks,
 )
 
@@ -175,6 +176,10 @@ class MidasHandRetargeter:
     def retarget_landmarks(self, landmarks: np.ndarray) -> RetargetingResult:
         """Retarget one 21x3 human landmark frame into MIDAS joint targets."""
 
+        if self.config.mode == DEXPILOT_MODE and self.config.palm_frame_input:
+            # See postprocess.landmarks_to_palm_frame: without this the solver
+            # is handed targets rotated away from the robot's frame and rails.
+            landmarks = landmarks_to_palm_frame(landmarks)
         return self.retarget_vectors(
             self.landmarks_to_vectors(landmarks),
             landmarks=landmarks,

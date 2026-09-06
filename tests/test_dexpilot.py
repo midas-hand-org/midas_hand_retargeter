@@ -143,7 +143,12 @@ def test_recovers_reachable_fingertip_targets():
     robot's proportions, which is what makes it a real check of the objective.
     """
 
-    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    # palm_frame_input=False: this test supplies fingertip positions already in
+    # the robot's palm frame, and populates only the tip landmarks, so the
+    # palm basis (built from the MCPs) would be degenerate.
+    retargeter = MidasHandRetargeter.create(
+        mode=DEXPILOT_MODE, palm_frame_input=False
+    )
     retargeter.profile = RetargetProfile().with_values({"dexpilot.scaling_factor": 1.0})
     robot = retargeter.dex_retargeting.optimizer.robot
 
