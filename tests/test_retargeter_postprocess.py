@@ -262,6 +262,9 @@ def test_neutral_calibration_preserves_active_joint_ranges():
         ),
     )
     retargeter._retargeting = None
+    # No solver here, so no solver-side narrowing: this test pins the analytic
+    # recentring arithmetic against the model limits it supplies above.
+    retargeter._solver_joint_limits = {}
 
     neutral_qpos = np.asarray([-0.4, 0.25, 1.2], dtype=np.float32)
     retargeter._last_uncalibrated_active_joint_positions = retargeter._active_positions_from_qpos(

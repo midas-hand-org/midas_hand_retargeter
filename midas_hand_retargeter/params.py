@@ -169,6 +169,16 @@ class DexPilotParams:
 
     #: Upstream low-pass on the solution. 1.0 = off.
     low_pass_alpha: float = 1.0
+    #: Extra spatial scale applied to the THUMB's own vectors only (its
+    #: base-rooted vector and its three pinch pairs). 1.0 = off.
+    #:
+    #: The thumb-root rebase removes most of the MIDAS thumb's proportional
+    #: excess; this closes the rest. Raising it straightens the thumb further
+    #: at a measured cost in fingertip accuracy: ~1.1 closes the residual gap,
+    #: 1.15 takes thumb bend 0.37 -> 0.17 rad for +1.4 mm of inter-fingertip
+    #: error, 1.42 reaches 0.15 rad for +3.3 mm. It does not help jitter.
+    thumb_vector_scale: float = 1.0
+
     #: Per-joint output low-pass. Default 1.0 (off), unlike the analytic path.
     #: The residual jitter in this mode is drift, not noise — the objective
     #: under-constrains the hand (10 vectors, 13 DOF), so redundant joints

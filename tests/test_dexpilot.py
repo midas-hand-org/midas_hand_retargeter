@@ -86,12 +86,18 @@ def test_objective_includes_pairwise_fingertip_vectors():
     assert indices.shape[1] == 10
 
     origins, tasks = indices[0], indices[1]
-    palm_rooted = [(o, t) for o, t in zip(origins, tasks, strict=True) if o == 0]
-    inter_finger = [(o, t) for o, t in zip(origins, tasks, strict=True) if o != 0]
-    assert len(palm_rooted) == 4
+    tip_landmarks = {4, 8, 12, 16}
+    # Base-rooted vectors start at a palm landmark; the thumb's is rebased onto
+    # the thumb CMC (landmark 1), the others stay at the wrist (landmark 0).
+    base_rooted = [
+        (o, t) for o, t in zip(origins, tasks, strict=True) if o not in tip_landmarks
+    ]
+    inter_finger = [
+        (o, t) for o, t in zip(origins, tasks, strict=True) if o in tip_landmarks
+    ]
+    assert len(base_rooted) == 4
     assert len(inter_finger) == 6, "the pairwise terms are the whole point"
 
-    tip_landmarks = {4, 8, 12, 16}
     for origin, task in inter_finger:
         assert origin in tip_landmarks and task in tip_landmarks
 
@@ -170,6 +176,15 @@ def test_recovers_reachable_fingertip_targets():
     landmarks = np.zeros((21, 3))
     for name, index in HUMAN_TIP.items():
         landmarks[index] = target[name]
+    # The thumb vector is rooted at the robot's CMC, so landmark 1 is now
+    # load-bearing. Derive it from the robot the same way the tips are derived,
+    # keeping this test fixture-free; leaving it at the origin would compare a
+    # wrist-rooted human vector against a CMC-rooted robot one, a ~66 mm bias.
+    robot.compute_forward_kinematics(np.asarray(source, dtype=float))
+    palm_inverse = np.linalg.inv(robot.get_link_pose(robot.get_link_index("palm_base")))
+    landmarks[1] = (
+        palm_inverse @ robot.get_link_pose(robot.get_link_index("thumb_cmc_side"))
+    )[:3, 3]
 
     retargeter.reset()
     for _ in range(30):

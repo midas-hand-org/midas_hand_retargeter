@@ -109,6 +109,29 @@ class MidasRetargeterConfig:
     palm_frame_input: bool = True
 
     wrist_link_name: str = "palm_base"
+
+    # --- thumb compensation (dexpilot only) ---------------------------------
+    # The MIDAS thumb is proportionally LONG: palm_base->thumb_tip is 180.1 mm
+    # against index 218.0 mm, a ratio of 0.83, where a human's is ~0.58. Two
+    # segments have no human counterpart — a 41.4 mm palm_base->thumb_cmc_roll
+    # offset and a 24.7 mm cmc_roll->cmc_side CMC mechanism. Comparing the
+    # operator's wrist->thumb-tip against the robot's palm->thumb-tip therefore
+    # forces the robot to curl its thumb to shorten itself, which is what makes
+    # the MCP and DIP bend to unnatural angles.
+
+    #: Compare the thumb against this robot link instead of ``wrist_link_name``,
+    #: dropping the two non-anatomical offsets above. ``None`` keeps the legacy
+    #: palm-rooted comparison. Measured on a real glove trace: thumb bend 0.63
+    #: -> 0.37 rad and still-hand jitter 0.416 -> 0.163 rad, for +1.0 mm of
+    #: inter-fingertip error.
+    thumb_root_link: str | None = "thumb_cmc_side"
+
+    #: Constrain the thumb MCP/DIP to flexion only, as the analytic map already
+    #: does (``postprocess.THUMB_MCP_RANGE``). The physical joint CAN
+    #: hyperextend, so this is a teleop policy — natural posture over reachable
+    #: workspace — not a joint limit. Measured: S-curve postures 42% -> 14%,
+    #: MCP hyperextension +0.60 -> +0.00 rad, at no cost to fingertip accuracy.
+    thumb_flexion_only: bool = True
     finger_tip_link_names: Sequence[str] = (
         "thumb_tip",
         "index_tip",
@@ -170,6 +193,19 @@ class MidasRetargeterConfig:
                 "— a real motion on hardware. Use mode='vector' for pure "
                 "optimizer output, or mode='refine' to mix the two."
             )
+
+        if self.mode != DEXPILOT_MODE:
+            # Fail loudly rather than silently ignoring a setting that only the
+            # DexPilot objective can act on.
+            for name, default in (
+                ("thumb_root_link", "thumb_cmc_side"),
+                ("thumb_flexion_only", True),
+            ):
+                if getattr(self, name) != default:
+                    raise ValueError(
+                        f"{name} only applies to mode={DEXPILOT_MODE!r}, "
+                        f"not mode={self.mode!r}."
+                    )
 
     @property
     def uses_optimizer(self) -> bool:

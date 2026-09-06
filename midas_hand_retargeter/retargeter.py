@@ -75,6 +75,11 @@ class MidasHandRetargeter:
         self._retargeting = None
         self._kinematic_adaptor = None
         self._passive_coupling = None
+        #: Solver-side narrowing, mirrored here so post-solve clipping and
+        #: neutral recentring cannot command outside what the solver allowed.
+        #: Empty in analytic mode, so the goldens are untouched by construction.
+        self._solver_joint_limits: dict[str, tuple[float, float]] = {}
+        self._warned: set[str] = set()
 
         if self.config.uses_optimizer:
             self._build_optimizer()
@@ -131,6 +136,11 @@ class MidasHandRetargeter:
 
         self.robot_joint_names = tuple(self._retargeting.joint_names)
         self.fixed_joint_names = tuple(self._retargeting.optimizer.fixed_joint_names)
+
+        if self.config.mode == DEXPILOT_MODE:
+            # Structural, so applied once here rather than per frame.
+            self._rebase_thumb_root()
+            self._apply_thumb_bounds()
         if self.robot_joint_names != self._model.joint_names:
             raise RuntimeError(
                 "Solver joint ordering does not match the checked-in HandModel. "
@@ -178,6 +188,22 @@ class MidasHandRetargeter:
         """Retarget one 21x3 human landmark frame into MIDAS joint targets."""
 
         self._last_landmarks = landmarks
+        if self.config.mode == DEXPILOT_MODE and self.config.thumb_root_link:
+            # The rebase makes MediaPipe landmark 1 load-bearing. Before it,
+            # DexPilot read only 0/4/8/12/16, so a source that fills fingertips
+            # only used to be fine and now feeds a ~66 mm biased thumb vector,
+            # silently. Wrist and thumb CMC are never 5 mm apart on a real hand.
+            points = np.asarray(landmarks)
+            if float(np.linalg.norm(points[1] - points[0])) < 5e-3:
+                self._warn_once(
+                    "thumb_cmc_landmark",
+                    "MediaPipe landmark 1 (thumb CMC) is on top of the wrist. "
+                    "thumb_root_link=%r needs it populated, or the thumb vector "
+                    "is biased by the robot's ~66 mm CMC offset. Set "
+                    "thumb_root_link=None if this source cannot provide it.",
+                    self.config.thumb_root_link,
+                )
+
         if self.config.mode == DEXPILOT_MODE and self.config.palm_frame_input:
             # See postprocess.landmarks_to_palm_frame: without this the solver
             # is handed targets rotated away from the robot's frame and rails.
@@ -337,6 +363,132 @@ class MidasHandRetargeter:
             )
         return qpos
 
+    #: Index of DexPilot's ``wrist -> thumb_tip`` vector. Its objective is six
+    #: pairwise inter-fingertip vectors followed by four base-rooted ones, so
+    #: for a 4-finger hand the thumb's base-rooted vector is index 6.
+    _DEXPILOT_THUMB_ROOT_VECTOR = 6
+    #: MediaPipe landmark for the thumb CMC, the human counterpart of the
+    #: robot's thumb base.
+    _HUMAN_THUMB_CMC_LANDMARK = 1
+
+    def _thumb_vector_weights(self, thumb_scale: float) -> np.ndarray:
+        """(10, 1) per-vector scale: the thumb's vectors only."""
+
+        optimizer = self._retargeting.optimizer
+        count = len(optimizer.origin_link_names)
+        if count != 10:
+            raise RuntimeError(
+                f"Expected DexPilot's 10 vectors, found {count}; refusing to "
+                "guess which rows belong to the thumb."
+            )
+        weights = np.ones((count, 1), dtype=np.float64)
+        for index, (origin, task) in enumerate(
+            zip(optimizer.origin_link_names, optimizer.task_link_names, strict=True)
+        ):
+            if "thumb" in origin or "thumb" in task:
+                weights[index, 0] = float(thumb_scale)
+        return weights
+
+    def _apply_thumb_bounds(self) -> None:
+        """Restrict the thumb to flexion, if the config asks for it.
+
+        The physical joint can hyperextend; this is a teleop policy that trades
+        reachable workspace for natural posture, and it matches what the
+        analytic map has always commanded on hardware. Without it the solver
+        uses the thumb's redundant DOF to hyperextend the MCP, producing
+        S-shaped postures on 42% of frames.
+        """
+
+        if not self.config.thumb_flexion_only:
+            return
+
+        optimizer = self._retargeting.optimizer
+        limits = np.array(
+            [self._model.limits(name) for name in self.active_joint_names],
+            dtype=np.float64,
+        )
+        if limits.shape != (optimizer.opt_dof, 2):
+            raise RuntimeError(
+                f"Expected {(optimizer.opt_dof, 2)} joint limits for the "
+                f"optimizer, built {limits.shape}. The target joint set and the "
+                "hand model have diverged."
+            )
+        for name in ("thumb_mcp_joint", "thumb_dip_joint"):
+            lower, _ = self._model.limits(name)
+            limits[self.active_joint_names.index(name)] = (lower, 0.0)
+            self._solver_joint_limits[name] = (lower, 0.0)
+
+        optimizer.set_joint_limit(limits)
+        # SeqRetargeting clips the warm start against its OWN copy of the
+        # limits, so the two must agree or nlopt rejects the start point.
+        self._retargeting.joint_limits = limits.astype(np.float32)
+        self._retargeting.set_qpos(
+            np.zeros(len(self.robot_joint_names), dtype=np.float32)
+        )
+
+    def _rebase_thumb_root(self) -> None:
+        """Measure the thumb from the robot's CMC rather than the palm.
+
+        DexPilot compares the operator's wrist->thumb-tip against the robot's
+        palm->thumb-tip, but 66 mm of the robot's thumb chain (a 41.4 mm palm
+        offset and a 24.7 mm CMC mechanism) has no human counterpart. Rebasing
+        both sides onto the thumb's own base removes exactly that, taking the
+        thumb/index proportion from 1.43 to 1.19 against a human's 1.17.
+
+        Unlike a scale factor this distorts nothing: the pairwise pinch vectors
+        are untouched.
+        """
+
+        root = self.config.thumb_root_link
+        if root is None:
+            return
+
+        import torch
+
+        optimizer = self._retargeting.optimizer
+        index = self._DEXPILOT_THUMB_ROOT_VECTOR
+
+        # DexPilot's vector ordering is the one genuinely fragile assumption
+        # here, so verify it rather than trusting it.
+        origins = list(optimizer.origin_link_names)
+        tasks = list(optimizer.task_link_names)
+        if len(origins) != 10 or origins[index] != self.config.wrist_link_name:
+            raise RuntimeError(
+                "DexPilot's vector layout is not what this rebase assumes: "
+                f"expected 10 vectors with #{index} rooted at "
+                f"{self.config.wrist_link_name!r}, got {len(origins)} with "
+                f"{origins[index] if len(origins) > index else 'nothing'!r}."
+            )
+        if tasks[index] != "thumb_tip":
+            raise RuntimeError(
+                f"Vector #{index} targets {tasks[index]!r}, not 'thumb_tip'; "
+                "refusing to rebase the wrong vector."
+            )
+
+        origins[index] = root
+        optimizer.origin_link_names = origins
+        optimizer.computed_link_names = list(set(origins) | set(tasks))
+        optimizer.origin_link_indices = torch.tensor(
+            [optimizer.computed_link_names.index(name) for name in origins]
+        )
+        optimizer.task_link_indices = torch.tensor(
+            [optimizer.computed_link_names.index(name) for name in tasks]
+        )
+        optimizer.computed_link_indices = optimizer.get_link_indices(
+            optimizer.computed_link_names
+        )
+
+        # The human side must be rebased to match, or the two sides of the
+        # comparison measure different things.
+        human = np.array(optimizer.target_link_human_indices).copy()
+        human[0, index] = self._HUMAN_THUMB_CMC_LANDMARK
+        optimizer.target_link_human_indices = human
+        logger.info(
+            "DexPilot thumb rebased onto %r (human landmark %d)",
+            root,
+            self._HUMAN_THUMB_CMC_LANDMARK,
+        )
+
     def _apply_dexpilot_params(self) -> None:
         """Push the live DexPilot knobs onto the optimizer before solving.
 
@@ -362,7 +514,16 @@ class MidasHandRetargeter:
             )
         self._dexpilot_signature = signature
 
-        optimizer.scaling = float(params.scaling_factor)
+        # dex_retargeting multiplies the (10, 3) target vectors by `scaling`, so
+        # assigning a (10, 1) array gives per-vector scaling by broadcast. Note
+        # a pair that is actively PROJECTED (a detected pinch) takes its target
+        # from projected_dist instead and bypasses this, which is fine.
+        if params.thumb_vector_scale != 1.0 and self.config.mode == DEXPILOT_MODE:
+            optimizer.scaling = float(params.scaling_factor) * self._thumb_vector_weights(
+                params.thumb_vector_scale
+            )
+        else:
+            optimizer.scaling = float(params.scaling_factor)
         optimizer.norm_delta = float(params.norm_delta)
         optimizer.project_dist = float(params.project_dist)
         optimizer.escape_dist = float(params.escape_dist)
@@ -421,10 +582,18 @@ class MidasHandRetargeter:
         becomes the robot's reach over yours.
 
         Uses the median over index/middle/ring. The thumb is deliberately
-        excluded: the MIDAS thumb reaches ~111 mm at its zero pose against a
-        human thumb's ~125 mm, the opposite correction the fingers need, so
-        including it biases the fit for every digit. That proportion mismatch
-        is real and one global scale cannot fix it.
+        excluded, because its proportions differ from the fingers': the MIDAS
+        thumb reaches 180 mm from the palm against an operator's ~121 mm, a
+        ratio of ~1.45, while the fingers sit near 1.21. Including it would
+        drag every finger's scale up.
+
+        (An earlier version of this note claimed the thumb reaches ~111 mm and
+        needed the *opposite* correction. That figure was measured with the
+        thumb tip frame that pointed backwards into the palm, before it was
+        fixed; the exclusion is still right, the reasoning was inverted.)
+
+        The remaining thumb mismatch is handled structurally instead, by
+        ``MidasRetargeterConfig.thumb_root_link``.
 
         Returns the scaling that was applied.
         """
@@ -596,8 +765,37 @@ class MidasHandRetargeter:
             return profile.finger(finger).smoothing_alpha
         return None
 
+    def _warn_once(self, key: str, message: str, *args) -> None:
+        """Log a warning the first time only; the control loop runs at 60 Hz."""
+
+        if key in self._warned:
+            return
+        self._warned.add(key)
+        logger.warning(message, *args)
+
+    def _effective_limits(self, joint_name: str) -> tuple[float, float]:
+        """URDF limits, narrowed by any solver policy in force.
+
+        Without this, neutral calibration re-creates exactly what the
+        flexion-only bounds removed. ``_neutral_calibrated_value`` rescales the
+        positive side by the joint's upper bound, so with the model's +1.57 a
+        neutral of -0.30 and a raw solve of -0.10 is remapped to +0.17 rad — a
+        hyperextended thumb, commanded downstream of the solver that was
+        forbidden to produce one. Verified: +0.17 / +0.23 / +0.27 rad for
+        neutrals of -0.3 / -0.5 / -0.8.
+
+        Empty in analytic mode by construction, so the goldens are untouched.
+        """
+
+        lower, upper = self._model.limits(joint_name)
+        override = self._solver_joint_limits.get(joint_name)
+        if override is not None:
+            lower, upper = max(lower, override[0]), min(upper, override[1])
+        return lower, upper
+
     def _clip_joint(self, joint_name: str, value: float) -> float:
-        return self._model.clip(joint_name, value)
+        lower, upper = self._effective_limits(joint_name)
+        return float(np.clip(value, lower, upper))
 
     def _apply_neutral_offsets(self, robot_qpos: np.ndarray) -> np.ndarray:
         """Recenter calibrated joints while preserving their full motion limits.
@@ -627,7 +825,7 @@ class MidasHandRetargeter:
         raw_value: float,
         neutral_value: float,
     ) -> float:
-        lower, upper = self._model.limits(joint_name)
+        lower, upper = self._effective_limits(joint_name)
         raw_value = float(np.clip(raw_value, lower, upper))
         neutral_value = float(np.clip(neutral_value, lower, upper))
 
