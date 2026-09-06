@@ -10,12 +10,14 @@ property that motivates it.
 from __future__ import annotations
 
 import importlib.util
+import pathlib
 
 import numpy as np
 import pytest
 
 from midas_hand_retargeter import MidasHandRetargeter, RetargetProfile
 from midas_hand_retargeter.config import DEXPILOT_MODE, MidasRetargeterConfig
+from midas_hand_retargeter.constants import ABDUCTION_JOINT_NAMES
 from midas_hand_retargeter.params import MODE_SECTIONS
 from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
@@ -23,6 +25,12 @@ from midas_hand_retargeter.postprocess import (
 )
 
 from ._poses import hand_pose
+
+#: A real 200-frame glove recording; see test_bounding_abduction_removes_curl_driven_lean
+#: for why the synthetic poses cannot stand in for it here.
+_TRACE_FRAMES = np.load(
+    pathlib.Path(__file__).parent / "goldens" / "glove_trace_thumb.npz"
+)["frames"]
 
 needs_optimizer = pytest.mark.skipif(
     importlib.util.find_spec("dex_retargeting") is None,
@@ -338,3 +346,79 @@ def test_cartesian_modes_model_the_passive_four_bar_coupling():
     uncoupled = index_tip(qpos)
     coupled = index_tip(coupling.forward_qpos(qpos.copy()))
     assert np.linalg.norm(uncoupled - coupled) > 0.03, "coupling must move the tip"
+
+
+
+@needs_optimizer
+def test_abduction_is_bounded_by_default():
+    """The default policy narrows abduction well inside the URDF's range."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    for name in ABDUCTION_JOINT_NAMES:
+        assert retargeter._solver_joint_limits[name] == pytest.approx((-0.25, 0.25))
+    limits = retargeter.dex_retargeting.joint_limits
+    for name in ABDUCTION_JOINT_NAMES:
+        lower, upper = limits[retargeter.active_joint_names.index(name)]
+        assert (float(lower), float(upper)) == pytest.approx((-0.25, 0.25), abs=1e-6)
+
+
+@needs_optimizer
+def test_abduction_limit_never_widens_past_the_model():
+    """It is a narrowing policy: a huge value must not exceed the URDF."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    retargeter.profile = retargeter.profile.with_values({"dexpilot.abduction_limit": 99.0})
+    retargeter.retarget_landmarks(_TRACE_FRAMES[0])
+    for name in ABDUCTION_JOINT_NAMES:
+        model = retargeter._model.limits(name)
+        lower, upper = retargeter._solver_joint_limits[name]
+        assert lower >= model[0] - 1e-9 and upper <= model[1] + 1e-9
+
+
+@needs_optimizer
+def test_abduction_limit_is_live_tunable():
+    """Moving the slider must reach the solver without a rebuild, and a zero
+    must not hand nlopt equal bounds, which SLSQP rejects."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    retargeter.retarget_landmarks(_TRACE_FRAMES[0])
+
+    retargeter.profile = retargeter.profile.with_values({"dexpilot.abduction_limit": 0.0})
+    result = retargeter.retarget_landmarks(_TRACE_FRAMES[1])
+    for name in ABDUCTION_JOINT_NAMES:
+        lower, upper = retargeter._solver_joint_limits[name]
+        assert lower < upper, "equal bounds are rejected by SLSQP"
+        # nlopt's set_joint_limit adds its own 1e-3 epsilon on top.
+        assert abs(result.active_joint_positions[name]) < 3e-3
+
+
+@needs_optimizer
+def test_bounding_abduction_removes_curl_driven_lean():
+    """Curling must not swing the fingers sideways. Regression, on real data.
+
+    This is "when I just curl, all three fingers lean toward the thumb": a
+    human's fingertips converge as they curl, and the MIDAS fingers -- which
+    curl in parallel planes -- can only imitate that convergence by abducting.
+    Measured on a 30 s recording, doing so buys 0.5 mm of inter-fingertip
+    accuracy and costs 0.77 rad of sideways swing.
+
+    The fixture is a real glove trace precisely because a synthetic pose does
+    not reproduce the effect: its fingers stay parallel, so there is no
+    convergence for the solver to chase and the bug is invisible.
+    """
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+
+    def swing(limit):
+        retargeter.profile = retargeter.profile.with_values(
+            {"dexpilot.abduction_limit": limit}
+        )
+        retargeter.reset()
+        seen = [[] for _ in ABDUCTION_JOINT_NAMES]
+        for frame in _TRACE_FRAMES[::4]:
+            active = retargeter.retarget_landmarks(frame).active_joint_positions
+            for slot, name in zip(seen, ABDUCTION_JOINT_NAMES, strict=True):
+                slot.append(active[name])
+        return max(max(v) - min(v) for v in seen)
+
+    assert swing(0.25) < 0.6 * swing(1.57)

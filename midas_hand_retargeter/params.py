@@ -172,17 +172,19 @@ class DexPilotParams:
     #: Scale applied to the palm frame's LATERAL axis only — how far apart the
     #: fingers are, independently of how far they reach. 1.0 = off.
     #:
-    #: The MIDAS fingers are splayed much wider than a human's: their fingertips
-    #: span 61.2 mm at rest against ~48 mm for a scaled human hand, a ratio of
-    #: ~1.28 where the reach scale is ~1.21. Without this the solver has to
-    #: swing each finger sideways to reach targets that sit inside its own
-    #: knuckle spacing, and because abduction loses lateral authority as the
-    #: finger curls, it does so by large and sometimes sign-flipping amounts —
-    #: measured 0.71 rad of jump on a constant lateral input.
+    #: This corrects a *static* proportion mismatch: the MIDAS fingertips span
+    #: 61.2 mm at rest, and a scaled operator's span need not match. It cannot
+    #: correct curl-induced lean, because that is not a static mismatch — on a
+    #: 30 s recording the operator's index-to-ring tip span swept 34.9-71.1 mm
+    #: while the robot's stayed fixed, so the scaled target straddles the
+    #: robot's own spacing and no single factor centres it. Use
+    #: ``abduction_limit`` for that.
     #:
     #: Operator-specific, so leave it at 1.0 and let "Calibrate hand size" set
-    #: it. Measured effect at the fitted value: mean abduction 0.122 -> 0.092
-    #: rad and worst jump 0.714 -> 0.298 rad.
+    #: it. Measured on real glove data, lowering it shrinks abduction roughly
+    #: proportionally (middle-finger swing 0.77 rad at 1.0, 0.65 at 0.86, 0.52
+    #: at 0.65) but costs accuracy fast below ~0.85: mean inter-fingertip error
+    #: 5.5 mm at 1.0, 6.4 mm at 0.86, 13.5 mm at 0.65.
     spread_scale: float = 1.0
 
     #: Extra spatial scale applied to the THUMB's own vectors only (its
@@ -194,6 +196,26 @@ class DexPilotParams:
     #: 1.15 takes thumb bend 0.37 -> 0.17 rad for +1.4 mm of inter-fingertip
     #: error, 1.42 reaches 0.15 rad for +3.3 mm. It does not help jitter.
     thumb_vector_scale: float = 1.0
+
+    #: Symmetric bound (rad) on the three finger abduction joints, or 0 to lock
+    #: them. **This is the knob for "my fingers lean toward the thumb when I
+    #: just curl".**
+    #:
+    #: A human's fingertips converge as they curl — the fingers are not
+    #: parallel — but the MIDAS fingers curl in parallel planes, so the only
+    #: way the solver can reproduce that convergence is to abduct. It is also
+    #: nearly free to do so: measured on a 30 s recording, locking abduction
+    #: outright costs just 0.5 mm of mean inter-fingertip error (5.5 -> 6.0 mm),
+    #: so the objective barely cares, and the redundant DOF drifts.
+    #:
+    #: Bounding it keeps genuine spreading while removing the curl artifact.
+    #: At the default, curl-driven lean falls 0.30 -> 0.11 rad, the middle
+    #: finger's swing 0.77 -> 0.35 rad and the worst frame-to-frame jump
+    #: 0.59 -> 0.25 rad, for +0.3 mm of inter-fingertip error, while the
+    #: response to real splay is 0.84 of unbounded. Do not go far below this:
+    #: at 0.15 the clipping becomes its own artifact and curl-driven lean rises
+    #: again to 0.24 rad.
+    abduction_limit: float = 0.25
 
     #: Per-joint output low-pass. Default 1.0 (off), unlike the analytic path.
     #: The residual jitter in this mode is drift, not noise — the objective

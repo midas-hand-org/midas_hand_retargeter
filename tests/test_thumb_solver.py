@@ -164,7 +164,9 @@ def test_palm_root_is_left_byte_identical():
     index = retargeter._DEXPILOT_THUMB_ROOT_VECTOR
     assert optimizer.origin_link_names[index] == "palm_base"
     assert np.asarray(optimizer.target_link_human_indices)[0][index] == 0
-    assert retargeter._solver_joint_limits == {}
+    # The abduction bound is a separate policy and stays on; only the thumb
+    # narrowing is what this escape hatch turns off.
+    assert not [n for n in retargeter._solver_joint_limits if n.startswith("thumb")]
 
 
 @needs_optimizer

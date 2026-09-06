@@ -23,6 +23,10 @@ ACTIVE_JOINT_NAMES = (
     "thumb_dip_joint",
 )
 
+# The three finger abduction (side-to-side) joints. Grouped because they are
+# bounded together as a teleop policy: see DexPilotParams.abduction_limit.
+ABDUCTION_JOINT_NAMES = tuple(f"{name}_mcp_abad_joint" for name in FINGER_NAMES)
+
 # Motor-command order expected by midas_hand_api.HandConfig defaults.
 HARDWARE_MOTOR_JOINT_NAMES = (
     "thumb_dip_joint",

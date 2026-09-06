@@ -9,7 +9,11 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from .config import DEXPILOT_MODE, MidasRetargeterConfig
-from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
+from .constants import (
+    ABDUCTION_JOINT_NAMES,
+    ACTIVE_JOINT_NAMES,
+    HARDWARE_MOTOR_JOINT_NAMES,
+)
 from .coupling import FIXED_PASSIVE_MODE, LookupPassiveCoupling
 from .human import landmarks_to_vectors
 from .params import RetargetProfile
@@ -80,6 +84,10 @@ class MidasHandRetargeter:
         #: Empty in analytic mode, so the goldens are untouched by construction.
         self._solver_joint_limits: dict[str, tuple[float, float]] = {}
         self._warned: set[str] = set()
+        # Before _build_optimizer: the abduction bound is read from the profile
+        # to size the solver's joint limits.
+        self._profile = as_profile(self.config.tuning)
+        self._dexpilot_abduction_limit = self._profile.dexpilot.abduction_limit
 
         if self.config.uses_optimizer:
             self._build_optimizer()
@@ -100,7 +108,6 @@ class MidasHandRetargeter:
             name: index for index, name in enumerate(self.robot_joint_names)
         }
         self._fixed_qpos = self._build_fixed_qpos()
-        self._profile = as_profile(self.config.tuning)
         # Cached so the two knobs that need a rebuild only pay for it on change.
         self._dexpilot_huber = self._profile.dexpilot.huber_delta
         self._dexpilot_etas = (
@@ -140,7 +147,7 @@ class MidasHandRetargeter:
         if self.config.mode == DEXPILOT_MODE:
             # Structural, so applied once here rather than per frame.
             self._rebase_thumb_root()
-            self._apply_thumb_bounds()
+            self._apply_solver_bounds()
         if self.robot_joint_names != self._model.joint_names:
             raise RuntimeError(
                 "Solver joint ordering does not match the checked-in HandModel. "
@@ -395,42 +402,72 @@ class MidasHandRetargeter:
                 weights[index, 0] = float(thumb_scale)
         return weights
 
-    def _apply_thumb_bounds(self) -> None:
-        """Restrict the thumb to flexion, if the config asks for it.
+    #: Below this the abduction bound is treated as a lock. nlopt is given a
+    #: sliver rather than exactly-equal bounds, which SLSQP does not accept.
+    _ABDUCTION_LOCK_EPS = 1e-4
 
-        The physical joint can hyperextend; this is a teleop policy that trades
-        reachable workspace for natural posture, and it matches what the
-        analytic map has always commanded on hardware. Without it the solver
-        uses the thumb's redundant DOF to hyperextend the MCP, producing
-        S-shaped postures on 42% of frames.
+    def _solver_limits(self) -> np.ndarray:
+        """Build the solver's joint limits, applying the MIDAS teleop policies.
+
+        Two narrowings live here, both deliberate departures from the URDF:
+
+        * the thumb is held to flexion only (see ``thumb_flexion_only``), and
+        * finger abduction is bounded (see ``DexPilotParams.abduction_limit``).
+
+        Both are also recorded in ``_solver_joint_limits`` so that post-solve
+        clipping and neutral recentring cannot command outside them.
         """
 
-        if not self.config.thumb_flexion_only:
-            return
-
-        optimizer = self._retargeting.optimizer
         limits = np.array(
             [self._model.limits(name) for name in self.active_joint_names],
             dtype=np.float64,
         )
+        optimizer = self._retargeting.optimizer
         if limits.shape != (optimizer.opt_dof, 2):
             raise RuntimeError(
                 f"Expected {(optimizer.opt_dof, 2)} joint limits for the "
                 f"optimizer, built {limits.shape}. The target joint set and the "
                 "hand model have diverged."
             )
-        for name in ("thumb_mcp_joint", "thumb_dip_joint"):
-            lower, _ = self._model.limits(name)
-            limits[self.active_joint_names.index(name)] = (lower, 0.0)
-            self._solver_joint_limits[name] = (lower, 0.0)
 
-        optimizer.set_joint_limit(limits)
+        if self.config.thumb_flexion_only:
+            for name in ("thumb_mcp_joint", "thumb_dip_joint"):
+                lower, _ = self._model.limits(name)
+                limits[self.active_joint_names.index(name)] = (lower, 0.0)
+                self._solver_joint_limits[name] = (lower, 0.0)
+
+        cap = max(float(self._profile.dexpilot.abduction_limit), self._ABDUCTION_LOCK_EPS)
+        for name in ABDUCTION_JOINT_NAMES:
+            if name not in self.active_joint_names:
+                continue
+            lower, upper = self._model.limits(name)
+            # Never widen past the URDF; this is a narrowing policy only.
+            bound = (max(-cap, lower), min(cap, upper))
+            limits[self.active_joint_names.index(name)] = bound
+            self._solver_joint_limits[name] = bound
+        return limits
+
+    def _push_solver_limits(self, limits: np.ndarray) -> None:
+        """Install ``limits`` on both copies the solver keeps, and re-seed."""
+
+        self._retargeting.optimizer.set_joint_limit(limits)
         # SeqRetargeting clips the warm start against its OWN copy of the
         # limits, so the two must agree or nlopt rejects the start point.
         self._retargeting.joint_limits = limits.astype(np.float32)
         self._retargeting.set_qpos(
             np.zeros(len(self.robot_joint_names), dtype=np.float32)
         )
+
+    def _apply_solver_bounds(self) -> None:
+        """Install the MIDAS joint-limit policies on a freshly built solver.
+
+        The thumb one is structural (it never changes after construction); the
+        abduction one is live-tunable and re-applied from
+        ``_apply_dexpilot_params`` when the operator moves the slider.
+        """
+
+        self._push_solver_limits(self._solver_limits())
+        self._dexpilot_abduction_limit = self._profile.dexpilot.abduction_limit
 
     def _rebase_thumb_root(self) -> None:
         """Measure the thumb from the robot's CMC rather than the palm.
@@ -530,6 +567,14 @@ class MidasHandRetargeter:
             )
         else:
             optimizer.scaling = float(params.scaling_factor)
+        if self._dexpilot_abduction_limit != params.abduction_limit:
+            # A narrowing of the solver's bounds, so it must go through
+            # set_joint_limit rather than being clipped after the fact — nlopt
+            # would otherwise keep searching outside and the clip would flatten
+            # against the bound instead of redistributing onto the other DOF.
+            self._push_solver_limits(self._solver_limits())
+            self._dexpilot_abduction_limit = params.abduction_limit
+
         optimizer.norm_delta = float(params.norm_delta)
         optimizer.project_dist = float(params.project_dist)
         optimizer.escape_dist = float(params.escape_dist)
