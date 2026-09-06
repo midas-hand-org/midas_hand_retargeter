@@ -425,29 +425,49 @@ class MidasHandRetargeter:
             joint_targets.update(finger_joint_targets_from_landmarks(landmarks, profile))
         if self.config.thumb_postprocess:
             joint_targets.update(thumb_joint_targets_from_landmarks(landmarks, profile))
+        if not joint_targets:
+            # Optimizer-only modes (vector, dexpilot) run no analytic layer, so
+            # there is nothing to apply and nothing to hold.
+            return robot_qpos
+
         qpos = self._apply_joint_targets(robot_qpos, joint_targets, profile)
-        return self._hold_disabled_joints(qpos, joint_targets)
+        return self._hold_disabled_joints(qpos, joint_targets, profile)
 
     def _hold_disabled_joints(
         self,
         robot_qpos: np.ndarray,
         joint_targets: Mapping[str, float],
+        profile: RetargetProfile,
     ) -> np.ndarray:
-        """Freeze digits whose params are disabled at their last command.
+        """Freeze digits the profile has disabled at their last command.
 
         A disabled digit emits no target. Without this it would fall through to
         the zero-initialised qpos and command 0.0 rad - flinging the finger
         fully open mid-teleop, which on hardware is a real and surprising
         motion. Held values bypass the smoothing filter: they are not new
         measurements.
+
+        Only digits that are *explicitly disabled* are held. This previously
+        held every active joint absent from ``joint_targets``, which silently
+        froze the whole hand in the optimizer-only modes: with no analytic
+        targets at all, the first frame's solution was latched forever and the
+        commanded pose never moved again.
         """
+
+        disabled = {name for name, params in profile.fingers() if not params.enabled}
+        if not profile.thumb.enabled:
+            disabled.add("thumb")
+        if not disabled:
+            return robot_qpos
 
         previous = self._last_uncalibrated_active_joint_positions
         if not previous:
             return robot_qpos
+
         qpos = robot_qpos
         for name in self.active_joint_names:
-            if name in joint_targets or name not in previous:
+            digit = "thumb" if name.startswith("thumb_") else name.partition("_")[0]
+            if digit not in disabled or name in joint_targets or name not in previous:
                 continue
             index = self._joint_index_by_name.get(name)
             if index is not None:

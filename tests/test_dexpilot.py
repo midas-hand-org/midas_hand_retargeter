@@ -186,3 +186,47 @@ def test_recovers_reachable_fingertip_targets():
     )
     assert tip_error < 0.010, f"tip error {tip_error*1000:.1f} mm"
     assert spacing_error < 0.010, f"inter-fingertip spacing error {spacing_error*1000:.1f} mm"
+
+
+@needs_optimizer
+def test_optimizer_modes_are_not_frozen_by_the_hold_logic():
+    """Regression: the whole hand used to latch on frame 1 in solver modes.
+
+    ``_hold_disabled_joints`` held every active joint absent from the analytic
+    layer's targets. In vector/dexpilot there are no analytic targets at all,
+    so the first frame's solution was held forever and the commanded pose never
+    moved again — the sim looked completely dead while the solver underneath
+    was tracking fine.
+    """
+
+    for mode in ("dexpilot", "vector"):
+        retargeter = MidasHandRetargeter.create(mode=mode, palm_frame_input=False)
+        retargeter.reset()
+
+        commanded = []
+        for step in range(12):
+            amount = 1.3 * step / 11
+            pose = hand_pose(curls=(amount,) * 3, thumb_curl=amount, thumb_oppose=0.8 * amount)
+            commanded.append(retargeter.retarget_landmarks(pose).active_vector())
+
+        spread = np.ptp(np.array(commanded), axis=0).max()
+        assert spread > 0.1, f"{mode} output frozen (max spread {spread:.4f} rad)"
+
+
+def test_hold_applies_only_to_digits_the_profile_disabled():
+    """The narrow behaviour the hold logic is actually for."""
+
+    retargeter = MidasHandRetargeter.create()  # analytic
+    curled = hand_pose(curls=(1.2, 1.2, 1.2))
+    for _ in range(30):
+        before = retargeter.retarget_landmarks(curled)
+    held = before.active_joint_positions["index_pip_joint"]
+
+    retargeter.profile = retargeter.profile.with_values({"index.enabled": False})
+    after = retargeter.retarget_landmarks(hand_pose(curls=(0.0, 0.0, 0.0)))
+
+    # index is frozen...
+    assert after.active_joint_positions["index_pip_joint"] == pytest.approx(held)
+    # ...and nothing else is.
+    assert after.active_joint_positions["middle_pip_joint"] > held + 0.1
+    assert after.active_joint_positions["ring_pip_joint"] > held + 0.1
