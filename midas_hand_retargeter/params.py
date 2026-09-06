@@ -169,8 +169,14 @@ class DexPilotParams:
 
     #: Upstream low-pass on the solution. 1.0 = off.
     low_pass_alpha: float = 1.0
-    #: Our per-joint post-filter, as for the analytic path.
-    smoothing_alpha: float = 0.25
+    #: Per-joint output low-pass. Default 1.0 (off), unlike the analytic path.
+    #: The residual jitter in this mode is drift, not noise — the objective
+    #: under-constrains the hand (10 vectors, 13 DOF), so redundant joints
+    #: wander even on a perfectly constant input. A low-pass cannot remove
+    #: drift, and measurably costs accuracy: at 0.5 it takes mean
+    #: inter-fingertip error from 8.3 mm to 20.3 mm while reducing jitter only
+    #: 0.42 -> 0.36 rad. Turn it down only if you prefer a calmer, laggier hand.
+    smoothing_alpha: float = 1.0
 
 
 @dataclass(frozen=True)

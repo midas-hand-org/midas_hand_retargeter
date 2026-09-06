@@ -276,3 +276,50 @@ def test_zero_pose_calibration_works_in_dexpilot_too():
     # ...without collapsing the usable range.
     moved = retargeter.retarget_landmarks(hand_pose(curls=(1.2,) * 3, thumb_oppose=0.9))
     assert np.abs(moved.active_vector()).max() > 0.3
+
+
+@needs_optimizer
+def test_cartesian_modes_model_the_passive_four_bar_coupling():
+    """The fingertip a Cartesian objective aims at must be the real one.
+
+    With fixed_passive the DIP joints are held at 0 during FK, but the MIDAS
+    four-bar linkage swings the distal phalanx with the PIP. The modelled
+    fingertip is then up to 59 mm from where the real one goes (23 mm at PIP
+    -0.3, 48 mm at -0.9, 59 mm at -1.45), which is larger than every other
+    error in the pipeline.
+    """
+
+    from midas_hand_retargeter.coupling import (
+        FIXED_PASSIVE_MODE,
+        PIP_DIP_LOOKUP_MODE,
+        LookupPassiveCoupling,
+    )
+    from midas_hand_retargeter.model import MIDAS_RIGHT_HAND
+
+    for mode in ("dexpilot", "vector", "refine"):
+        assert MidasRetargeterConfig(mode=mode).coupling_mode == PIP_DIP_LOOKUP_MODE
+    # The analytic map never reads a passive joint, so it stays dependency-free.
+    assert MidasRetargeterConfig().coupling_mode == FIXED_PASSIVE_MODE
+    # An explicit choice is still honoured.
+    assert (
+        MidasRetargeterConfig(mode="dexpilot", coupling_mode=FIXED_PASSIVE_MODE).coupling_mode
+        == FIXED_PASSIVE_MODE
+    )
+
+    # And the error being avoided is real and large.
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    robot = retargeter.dex_retargeting.optimizer.robot
+    model = MIDAS_RIGHT_HAND
+    coupling = LookupPassiveCoupling(model)
+
+    def index_tip(qpos):
+        robot.compute_forward_kinematics(np.asarray(qpos, dtype=float))
+        inverse = np.linalg.inv(robot.get_link_pose(robot.get_link_index("palm_base")))
+        return (inverse @ robot.get_link_pose(robot.get_link_index("index_tip")))[:3, 3]
+
+    qpos = np.zeros(19)
+    qpos[model.index("index_pip_joint")] = -0.9
+    qpos[model.index("index_mcp_pitch_joint")] = -1.2
+    uncoupled = index_tip(qpos)
+    coupled = index_tip(coupling.forward_qpos(qpos.copy()))
+    assert np.linalg.norm(uncoupled - coupled) > 0.03, "coupling must move the tip"

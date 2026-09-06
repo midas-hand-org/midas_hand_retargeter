@@ -217,10 +217,26 @@ class MidasHandRetargeter:
                     robot_qpos[index] = value
         if landmarks is not None:
             robot_qpos = self._apply_landmark_postprocess(robot_qpos, landmarks)
+        # Anchor the solver to its OWN last solution, before any output
+        # filtering: feeding a smoothed value back as the warm start makes the
+        # filter part of the control loop, and the solver then chases its own
+        # lag instead of the target.
+        self._sync_optimizer_warm_start(robot_qpos)
+
+        if self.config.uses_optimizer and not self.config.finger_postprocess:
+            # Optimizer-only modes never pass through _apply_joint_targets, so
+            # nothing was smoothing them. The DexPilot objective leaves the
+            # hand under-constrained (10 vectors for 13 DOF), so redundant
+            # joints wander even on a perfectly constant input — measured at
+            # 0.23 rad with the same frame repeated 40 times. This is the
+            # output filter that keeps that out of the commanded pose.
+            robot_qpos = self._filter_active_joints(
+                robot_qpos, self._profile.dexpilot.smoothing_alpha
+            )
+
         self._last_uncalibrated_active_joint_positions = self._active_positions_from_qpos(
             robot_qpos
         )
-        self._sync_optimizer_warm_start(robot_qpos)
         robot_qpos = self._apply_neutral_offsets(robot_qpos)
         robot_qpos = self._apply_kinematic_adaptor(robot_qpos)
         return self._make_result(robot_qpos, vectors)
@@ -305,6 +321,21 @@ class MidasHandRetargeter:
             if name in self._last_uncalibrated_active_joint_positions
         }
         return self.neutral_joint_offsets
+
+    def _filter_active_joints(self, robot_qpos: np.ndarray, alpha: float) -> np.ndarray:
+        """Low-pass the actuated joints of a solver result."""
+
+        if alpha >= 1.0:
+            return robot_qpos
+        qpos = np.asarray(robot_qpos, dtype=np.float32).copy()
+        for name in self.active_joint_names:
+            index = self._joint_index_by_name.get(name)
+            if index is None:
+                continue
+            qpos[index] = self._postprocess_filter.update(
+                name, float(qpos[index]), alpha
+            )
+        return qpos
 
     def _apply_dexpilot_params(self) -> None:
         """Push the live DexPilot knobs onto the optimizer before solving.

@@ -12,7 +12,11 @@ from .constants import (
     DEFAULT_TARGET_ORIGIN_LINK_NAMES,
     DEFAULT_TARGET_TASK_LINK_NAMES,
 )
-from .coupling import FIXED_PASSIVE_MODE, normalize_coupling_mode
+from .coupling import (
+    FIXED_PASSIVE_MODE,
+    PIP_DIP_LOOKUP_MODE,
+    normalize_coupling_mode,
+)
 from .model import MIDAS_RIGHT_HAND, HandModel
 from .paths import default_urdf_path
 from .tuning import RetargeterTuning
@@ -36,6 +40,8 @@ SUPPORTED_RETARGET_MODES = (ANALYTIC_MODE, VECTOR_MODE, REFINE_MODE, DEXPILOT_MO
 
 #: Modes that drive the joints purely from the optimizer.
 _OPTIMIZER_ONLY_MODES = (VECTOR_MODE, DEXPILOT_MODE)
+#: Every mode whose fingertip FK must model the passive four-bar coupling.
+_OPTIMIZER_MODES = (VECTOR_MODE, REFINE_MODE, DEXPILOT_MODE)
 
 
 def normalize_retarget_mode(mode: str) -> str:
@@ -82,7 +88,10 @@ class MidasRetargeterConfig:
     #   fixed_passive: option 1, passive joints are fixed during FK.
     #   pip_dip_lookup: option 2, adaptor fills passive DIP/linkage from PIP.
     passive_fixed_qpos: Mapping[str, float] = field(default_factory=dict)
-    coupling_mode: str = FIXED_PASSIVE_MODE
+    #: ``None`` picks per mode: the analytic map never reads passive joints, so
+    #: it defaults to ``fixed_passive`` and stays dependency-free, while the
+    #: Cartesian modes default to ``pip_dip_lookup`` because they must not.
+    coupling_mode: str | None = None
     pip_dip_lookup_path: str | Path | None = None
 
     # Which retargeting method drives the actuated joints. See the module
@@ -122,7 +131,22 @@ class MidasRetargeterConfig:
         # Frozen dataclass: normalize through object.__setattr__ so the
         # canonical value is stored once instead of re-derived at each use.
         object.__setattr__(self, "mode", normalize_retarget_mode(self.mode))
-        object.__setattr__(self, "coupling_mode", normalize_coupling_mode(self.coupling_mode))
+        # Resolve the passive-joint model. This matters far more for the
+        # Cartesian modes than it looks: with fixed_passive the DIP joints are
+        # held at 0 during FK, so the fingertip the solver aims at is up to
+        # 59 mm from where the real one goes once the finger curls, because the
+        # four-bar linkage swings the distal phalanx with the PIP. Measured on
+        # the index finger: 23 mm at PIP -0.3, 48 mm at -0.9, 59 mm at -1.45.
+        # That dwarfs every other error in the pipeline, so the vector modes
+        # default to modelling the real coupling.
+        coupling = self.coupling_mode
+        if coupling is None:
+            coupling = (
+                PIP_DIP_LOOKUP_MODE
+                if self.mode in _OPTIMIZER_MODES
+                else FIXED_PASSIVE_MODE
+            )
+        object.__setattr__(self, "coupling_mode", normalize_coupling_mode(coupling))
 
         if self.mode in _OPTIMIZER_ONLY_MODES and (
             self.thumb_postprocess or self.finger_postprocess

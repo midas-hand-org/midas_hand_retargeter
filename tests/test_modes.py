@@ -22,6 +22,7 @@ from midas_hand_retargeter.config import (
     VECTOR_MODE,
     MidasRetargeterConfig,
 )
+from midas_hand_retargeter.coupling import FIXED_PASSIVE_MODE
 
 from ._poses import GOLDEN_POSES
 
@@ -83,8 +84,17 @@ def test_analytic_matches_refine_exactly():
     slots, which come from passive_fixed_qpos either way.
     """
 
-    analytic = MidasHandRetargeter.create(mode=ANALYTIC_MODE)
-    refine = MidasHandRetargeter.create(mode=REFINE_MODE)
+    # Pin the coupling: this test is about the analytic layer versus
+    # optimizer-then-analytic, not about passive-joint modelling. The two modes
+    # now default differently — the Cartesian modes need the real four-bar
+    # coupling for their fingertip FK — which would show up as a legitimate
+    # difference in the passive slots of robot_qpos.
+    analytic = MidasHandRetargeter.create(
+        mode=ANALYTIC_MODE, coupling_mode=FIXED_PASSIVE_MODE
+    )
+    refine = MidasHandRetargeter.create(
+        mode=REFINE_MODE, coupling_mode=FIXED_PASSIVE_MODE
+    )
 
     for name, landmarks in GOLDEN_POSES:
         left = analytic.retarget_landmarks(landmarks)
