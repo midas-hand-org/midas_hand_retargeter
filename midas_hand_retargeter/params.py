@@ -129,6 +129,51 @@ class ThumbParams:
 
 
 @dataclass(frozen=True)
+class DexPilotParams:
+    """Solver parameters for the DexPilot optimizer (``mode="dexpilot"``).
+
+    Unlike the analytic map, DexPilot optimises *fingertip positions*: six
+    pairwise inter-fingertip vectors (index-thumb, middle-thumb, ring-thumb,
+    middle-index, ring-index, ring-middle) plus four palm-rooted ones. That is
+    why it can reproduce the relative geometry between fingers, which the
+    analytic map structurally cannot — the analytic map is blind to absolute
+    hand geometry (scaling a hand 0.6x-3x changes its output by ~3e-6 rad).
+
+    Every field here is applied live; none needs a rebuild.
+    """
+
+    #: Human-to-robot size ratio. **The most important knob in this mode.**
+    #: The analytic map ignores hand size entirely; DexPilot does not — a 0.7x
+    #: to 1.5x change moves joints by ~1.5 rad. Calibrate it to the operator.
+    scaling_factor: float = 1.15
+
+    #: Huber loss width (m). Below this, error is quadratic; above, linear.
+    #: Smaller tracks small errors harder but is more jittery.
+    huber_delta: float = 0.03
+
+    #: Temporal regularizer. Penalises deviation from the previous solution,
+    #: so larger is smoother but laggier. This is the solver's own smoothing.
+    norm_delta: float = 4e-3
+
+    #: Distance (m) at which a fingertip pair is treated as *trying to touch*
+    #: and its target distance snaps to eta1/eta2. This is what makes pinches
+    #: land precisely instead of hovering.
+    project_dist: float = 0.03
+    #: Distance (m) at which a projected pair is released again. Must exceed
+    #: project_dist; the gap is hysteresis against chattering in and out.
+    escape_dist: float = 0.05
+    #: Projected target distance for thumb-to-finger pairs (m).
+    eta1: float = 1e-4
+    #: Projected target distance for finger-to-finger pairs (m).
+    eta2: float = 3e-2
+
+    #: Upstream low-pass on the solution. 1.0 = off.
+    low_pass_alpha: float = 1.0
+    #: Our per-joint post-filter, as for the analytic path.
+    smoothing_alpha: float = 0.25
+
+
+@dataclass(frozen=True)
 class RetargetProfile:
     """A complete analytic tuning profile: one entry per digit.
 
@@ -139,6 +184,8 @@ class RetargetProfile:
     middle: FingerParams = FingerParams()
     ring: FingerParams = FingerParams()
     thumb: ThumbParams = ThumbParams()
+    #: Solver knobs for mode="dexpilot". Ignored by the analytic path.
+    dexpilot: DexPilotParams = DexPilotParams()
 
     #: Free-form provenance: which source/hand this was tuned for.
     name: str = "default"
@@ -234,6 +281,17 @@ _SECTION_TYPES: dict[str, type] = {
     "middle": FingerParams,
     "ring": FingerParams,
     "thumb": ThumbParams,
+    "dexpilot": DexPilotParams,
+}
+
+#: Which sections each retargeting mode actually reads. A tuning UI must hide
+#: the rest: a slider that silently does nothing is the worst thing a tuning
+#: tool can offer, and is exactly how ~20 dead CLI flags accumulated before.
+MODE_SECTIONS: dict[str, tuple[str, ...]] = {
+    "analytic": ("thumb", "index", "middle", "ring"),
+    "refine": ("thumb", "index", "middle", "ring"),
+    "vector": (),
+    "dexpilot": ("dexpilot",),
 }
 
 

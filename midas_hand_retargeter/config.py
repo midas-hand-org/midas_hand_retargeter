@@ -28,7 +28,14 @@ VECTOR_MODE = "vector"
 #: solution is fully overwritten for every actuated joint, so it contributes
 #: nothing to the command; prefer ``analytic`` unless comparing against history.
 REFINE_MODE = "refine"
-SUPPORTED_RETARGET_MODES = (ANALYTIC_MODE, VECTOR_MODE, REFINE_MODE)
+#: DexPilot optimizer: optimizes six pairwise INTER-FINGERTIP vectors plus four
+#: palm-rooted ones, so unlike every other mode it controls where the fingertips
+#: sit relative to each other. Analytic layer off. Needs the [vector] extra.
+DEXPILOT_MODE = "dexpilot"
+SUPPORTED_RETARGET_MODES = (ANALYTIC_MODE, VECTOR_MODE, REFINE_MODE, DEXPILOT_MODE)
+
+#: Modes that drive the joints purely from the optimizer.
+_OPTIMIZER_ONLY_MODES = (VECTOR_MODE, DEXPILOT_MODE)
 
 
 def normalize_retarget_mode(mode: str) -> str:
@@ -82,6 +89,18 @@ class MidasRetargeterConfig:
     # constants above. Default is the analytic geometric map.
     mode: str = ANALYTIC_MODE
 
+    # DexPilot target definition. The fingertip frames do not exist in the
+    # source URDF and are injected by ``urdf.with_tip_links``; their offsets
+    # are CAD estimates, and in this mode they are load-bearing because the
+    # solver aims at them directly. Measure them on the real hand.
+    wrist_link_name: str = "palm_base"
+    finger_tip_link_names: Sequence[str] = (
+        "thumb_tip",
+        "index_tip",
+        "middle_tip",
+        "ring_tip",
+    )
+
     # Joint names and limits. Solver-free, so the analytic path needs no URDF.
     hand_model: HandModel = MIDAS_RIGHT_HAND
 
@@ -99,7 +118,9 @@ class MidasRetargeterConfig:
         object.__setattr__(self, "mode", normalize_retarget_mode(self.mode))
         object.__setattr__(self, "coupling_mode", normalize_coupling_mode(self.coupling_mode))
 
-        if self.mode == VECTOR_MODE and (self.thumb_postprocess or self.finger_postprocess):
+        if self.mode in _OPTIMIZER_ONLY_MODES and (
+            self.thumb_postprocess or self.finger_postprocess
+        ):
             object.__setattr__(self, "thumb_postprocess", False)
             object.__setattr__(self, "finger_postprocess", False)
 
@@ -124,7 +145,7 @@ class MidasRetargeterConfig:
     def uses_optimizer(self) -> bool:
         """Whether this config needs dex_retargeting (and so torch/pinocchio)."""
 
-        return self.mode in (VECTOR_MODE, REFINE_MODE)
+        return self.mode in (VECTOR_MODE, REFINE_MODE, DEXPILOT_MODE)
 
     def resolved_urdf_path(self) -> Path:
         if self.urdf_path is not None:
@@ -135,6 +156,8 @@ class MidasRetargeterConfig:
         return default_urdf_path(self.mujoco_repo)
 
     def to_dex_config_dict(self) -> dict:
+        if self.mode == DEXPILOT_MODE:
+            return self._to_dexpilot_config_dict()
         return {
             "type": "vector",
             "urdf_path": with_tip_links(str(self.resolved_urdf_path())),
@@ -148,6 +171,44 @@ class MidasRetargeterConfig:
             "low_pass_alpha": float(self.low_pass_alpha),
             "has_joint_limits": bool(self.has_joint_limits),
         }
+
+    def _to_dexpilot_config_dict(self) -> dict:
+        """DexPilot config. Solver knobs come from the live tuning profile.
+
+        The human landmark indices are deliberately left to the optimizer's
+        default (wrist + the four fingertips, MediaPipe 0/4/8/12/16); passing
+        our own would silently override its pairwise structure.
+        """
+
+        dexpilot = self.tuning_profile.dexpilot
+        # Only the keys RetargetingConfig actually forwards to
+        # DexPilotOptimizer. It does NOT forward huber_delta, normal_delta,
+        # eta1 or eta2 for this type, so those keep the optimizer's defaults at
+        # construction and are pushed live each frame by the retargeter
+        # instead — which is what makes them tunable at all.
+        return {
+            "type": "dexpilot",
+            "urdf_path": with_tip_links(str(self.resolved_urdf_path())),
+            "wrist_link_name": self.wrist_link_name,
+            "finger_tip_link_names": list(self.finger_tip_link_names),
+            "target_joint_names": list(self.target_joint_names),
+            "scaling_factor": float(dexpilot.scaling_factor),
+            "project_dist": float(dexpilot.project_dist),
+            "escape_dist": float(dexpilot.escape_dist),
+            "low_pass_alpha": float(dexpilot.low_pass_alpha),
+            "has_joint_limits": bool(self.has_joint_limits),
+        }
+
+    @property
+    def tuning_profile(self):
+        """``tuning`` as a RetargetProfile, whatever form it was supplied in."""
+
+        from .params import RetargetProfile
+        from .postprocess import as_profile
+
+        if isinstance(self.tuning, RetargetProfile):
+            return self.tuning
+        return as_profile(self.tuning)
 
     def build_dex_config(self):
         try:

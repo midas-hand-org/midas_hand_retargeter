@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import MidasRetargeterConfig
+from .config import DEXPILOT_MODE, MidasRetargeterConfig
 from .constants import ACTIVE_JOINT_NAMES, HARDWARE_MOTOR_JOINT_NAMES
 from .coupling import FIXED_PASSIVE_MODE, LookupPassiveCoupling
 from .human import landmarks_to_vectors
@@ -95,6 +95,13 @@ class MidasHandRetargeter:
         }
         self._fixed_qpos = self._build_fixed_qpos()
         self._profile = as_profile(self.config.tuning)
+        # Cached so the two knobs that need a rebuild only pay for it on change.
+        self._dexpilot_huber = self._profile.dexpilot.huber_delta
+        self._dexpilot_etas = (
+            self._profile.dexpilot.eta1,
+            self._profile.dexpilot.eta2,
+        )
+        self._dexpilot_signature = None
         self._postprocess_filter = JointTargetFilter()
         self._neutral_joint_offsets: dict[str, float] = {}
         self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
@@ -148,8 +155,22 @@ class MidasHandRetargeter:
 
         return landmarks_to_vectors(
             landmarks,
-            target_link_human_indices=self.config.target_link_human_indices,
+            target_link_human_indices=self._target_link_human_indices,
         )
+
+    @property
+    def _target_link_human_indices(self):
+        """Landmark pairs for the active objective.
+
+        DexPilot derives its own (wrist + the four fingertips, and every
+        pairwise fingertip combination); overriding them with the vector-mode
+        pairs would silently destroy the inter-finger structure that is the
+        whole reason to use it.
+        """
+
+        if self._retargeting is not None and self.config.mode == DEXPILOT_MODE:
+            return self._retargeting.optimizer.target_link_human_indices
+        return self.config.target_link_human_indices
 
     def retarget_landmarks(self, landmarks: np.ndarray) -> RetargetingResult:
         """Retarget one 21x3 human landmark frame into MIDAS joint targets."""
@@ -174,6 +195,8 @@ class MidasHandRetargeter:
         """
 
         vectors = self._as_ref_vectors(ref_vectors)
+        if self.config.mode == DEXPILOT_MODE:
+            self._apply_dexpilot_params()
         if self._retargeting is not None:
             robot_qpos = self._retargeting.retarget(vectors, fixed_qpos=self._fixed_qpos)
         else:
@@ -276,6 +299,57 @@ class MidasHandRetargeter:
         }
         return self.neutral_joint_offsets
 
+    def _apply_dexpilot_params(self) -> None:
+        """Push the live DexPilot knobs onto the optimizer before solving.
+
+        All of these are read per-solve, so live tuning needs no rebuild. eta1
+        and eta2 are the exception: they are baked into a projection cache at
+        construction, so that cache is recomputed when they change.
+        """
+
+        params = self._profile.dexpilot
+        optimizer = self._retargeting.optimizer
+
+        # The norm_delta temporal regularizer anchors each solve to the previous
+        # one, so after a parameter change the old solution is a bad anchor and
+        # the solver barely moves — a scaling slider would feel dead. Drop the
+        # warm start when the parameters themselves change (not every frame).
+        signature = (
+            params.scaling_factor, params.huber_delta, params.norm_delta,
+            params.project_dist, params.escape_dist, params.eta1, params.eta2,
+        )
+        if self._dexpilot_signature is not None and signature != self._dexpilot_signature:
+            self._retargeting.set_qpos(
+                np.zeros(len(self.robot_joint_names), dtype=np.float32)
+            )
+        self._dexpilot_signature = signature
+
+        optimizer.scaling = float(params.scaling_factor)
+        optimizer.norm_delta = float(params.norm_delta)
+        optimizer.project_dist = float(params.project_dist)
+        optimizer.escape_dist = float(params.escape_dist)
+
+        if self._dexpilot_huber != params.huber_delta:
+            import torch
+
+            optimizer.huber_loss = torch.nn.SmoothL1Loss(
+                beta=float(params.huber_delta), reduction="none"
+            )
+            self._dexpilot_huber = params.huber_delta
+
+        if self._dexpilot_etas != (params.eta1, params.eta2):
+            optimizer.eta1 = float(params.eta1)
+            optimizer.eta2 = float(params.eta2)
+            (
+                optimizer.projected,
+                optimizer.s2_project_index_origin,
+                optimizer.s2_project_index_task,
+                optimizer.projected_dist,
+            ) = optimizer.set_dexpilot_cache(
+                optimizer.num_fingers, float(params.eta1), float(params.eta2)
+            )
+            self._dexpilot_etas = (params.eta1, params.eta2)
+
     def _sync_optimizer_warm_start(self, robot_qpos: np.ndarray) -> None:
         """Anchor the solver's temporal regularizer to the commanded pose.
 
@@ -319,7 +393,7 @@ class MidasHandRetargeter:
 
     def _as_ref_vectors(self, ref_vectors: np.ndarray) -> np.ndarray:
         vectors = np.asarray(ref_vectors, dtype=np.float32)
-        expected_shape = (len(self.config.target_task_link_names), 3)
+        expected_shape = (len(np.asarray(self._target_link_human_indices)[0]), 3)
         if vectors.shape != expected_shape:
             raise ValueError(f"Expected ref_vectors shape {expected_shape}, got {vectors.shape}")
         return vectors
