@@ -9,8 +9,22 @@ import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 
+#: Fingertip frames, as ``parent link -> offset in that link's frame``. The
+#: source URDF ends each digit at its DIP joint origin, but a Cartesian
+#: objective needs the actual tip, so these are injected at load time.
+#:
+#: The thumb offset was ``0 -0.042 -0.010``, which placed thumb_tip 28 mm
+#: *closer* to the palm than the thumb's own DIP joint — the "fingertip" sat
+#: behind the knuckle, pointing back down the chain (cos -0.84 against the
+#: thumb's distal direction). Any Cartesian retargeting then aimed the thumb at
+#: a point inside the hand. Flipping the sign gives cos +0.96 and puts the tip
+#: 41 mm distal, matching the fingers' 37 mm.
+#:
+#: These are CAD estimates and only the vector modes read them; the analytic
+#: map never touches a tip frame, which is why this went unnoticed. Worth
+#: measuring on the real hand.
 TIP_LINKS = {
-    "thumb_tip": ("thumb_dip", "0 -0.042 -0.010"),
+    "thumb_tip": ("thumb_dip", "0 0.042 -0.010"),
     "index_tip": ("index_dip_link", "0 0.036 -0.009"),
     "middle_tip": ("middle_dip_link", "0 0.036 -0.009"),
     "ring_tip": ("ring_dip_link", "0 0.036 -0.009"),
