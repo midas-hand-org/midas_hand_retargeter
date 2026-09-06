@@ -12,7 +12,6 @@ import pytest
 from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.model import MIDAS_RIGHT_HAND
 from midas_hand_retargeter.params import (
-    PARAMETER_COUNT,
     RetargetProfile,
 )
 from midas_hand_retargeter.postprocess import finger_joint_targets_from_landmarks
@@ -30,9 +29,20 @@ def test_there_is_no_pinky():
 
 
 def test_schema_stays_a_tunable_size():
-    """A UI with hundreds of sliders is not a tuning tool."""
+    """A UI with hundreds of sliders is not a tuning tool.
 
-    assert 40 <= PARAMETER_COUNT <= 60, PARAMETER_COUNT
+    Checked per MODE, not in total: the tuner only ever renders the sections
+    the running mode reads, so an operator sees the analytic knobs or the
+    solver knobs, never both.
+    """
+
+    from midas_hand_retargeter.params import _SECTION_FIELDS, MODE_SECTIONS
+
+    for mode, sections in MODE_SECTIONS.items():
+        visible = sum(len(_SECTION_FIELDS[name]) for name in sections)
+        assert visible <= 60, f"{mode} shows {visible} controls"
+    analytic = sum(len(_SECTION_FIELDS[n]) for n in MODE_SECTIONS["analytic"])
+    assert 40 <= analytic <= 60, analytic
 
 
 def test_curl_gain_is_independent_per_finger():

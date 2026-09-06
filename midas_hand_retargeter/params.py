@@ -169,6 +169,22 @@ class DexPilotParams:
 
     #: Upstream low-pass on the solution. 1.0 = off.
     low_pass_alpha: float = 1.0
+    #: Scale applied to the palm frame's LATERAL axis only — how far apart the
+    #: fingers are, independently of how far they reach. 1.0 = off.
+    #:
+    #: The MIDAS fingers are splayed much wider than a human's: their fingertips
+    #: span 61.2 mm at rest against ~48 mm for a scaled human hand, a ratio of
+    #: ~1.28 where the reach scale is ~1.21. Without this the solver has to
+    #: swing each finger sideways to reach targets that sit inside its own
+    #: knuckle spacing, and because abduction loses lateral authority as the
+    #: finger curls, it does so by large and sometimes sign-flipping amounts —
+    #: measured 0.71 rad of jump on a constant lateral input.
+    #:
+    #: Operator-specific, so leave it at 1.0 and let "Calibrate hand size" set
+    #: it. Measured effect at the fitted value: mean abduction 0.122 -> 0.092
+    #: rad and worst jump 0.714 -> 0.298 rad.
+    spread_scale: float = 1.0
+
     #: Extra spatial scale applied to the THUMB's own vectors only (its
     #: base-rooted vector and its three pinch pairs). 1.0 = off.
     #:

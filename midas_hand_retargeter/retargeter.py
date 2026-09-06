@@ -208,6 +208,12 @@ class MidasHandRetargeter:
             # See postprocess.landmarks_to_palm_frame: without this the solver
             # is handed targets rotated away from the robot's frame and rails.
             landmarks = landmarks_to_palm_frame(landmarks)
+            spread = self._profile.dexpilot.spread_scale
+            if spread != 1.0:
+                # Lateral axis only (column 0 by construction of the palm
+                # frame), so finger spacing is corrected without touching reach.
+                landmarks = landmarks.copy()
+                landmarks[:, 0] *= spread
         return self.retarget_vectors(
             self.landmarks_to_vectors(landmarks),
             landmarks=landmarks,
@@ -614,11 +620,41 @@ class MidasHandRetargeter:
             raise RuntimeError("Could not measure hand size from this frame")
 
         scaling = float(np.median(ratios))
-        self._profile = replace(
-            self._profile, dexpilot=replace(self._profile.dexpilot, scaling_factor=scaling)
+
+        # Finger SPACING is a separate ratio from finger REACH, and on this hand
+        # they differ by ~25%. Fit it from the fingertip span at rest: the robot
+        # spans 61.2 mm against a scaled human's ~48 mm.
+        spread = 1.0
+        human_span = float(abs(points[16][0] - points[8][0]))
+        robot_span = abs(
+            self._open_pose_lateral("ring_tip") - self._open_pose_lateral("index_tip")
         )
-        logger.info("Calibrated DexPilot scaling_factor to %.3f", scaling)
+        if human_span > 1e-3 and robot_span > 0:
+            spread = float(robot_span / (human_span * scaling))
+
+        self._profile = replace(
+            self._profile,
+            dexpilot=replace(
+                self._profile.dexpilot, scaling_factor=scaling, spread_scale=spread
+            ),
+        )
+        logger.info(
+            "Calibrated DexPilot scaling_factor to %.3f and spread_scale to %.3f",
+            scaling,
+            spread,
+        )
         return scaling
+
+    def _open_pose_lateral(self, link_name: str) -> float:
+        """Lateral (palm-frame X) coordinate of ``link_name`` with the hand open."""
+
+        if self._retargeting is None:
+            return 0.0
+        robot = self._retargeting.optimizer.robot
+        robot.compute_forward_kinematics(np.zeros(robot.dof))
+        palm = robot.get_link_pose(robot.get_link_index(self.config.wrist_link_name))
+        tip = robot.get_link_pose(robot.get_link_index(link_name))
+        return float((np.linalg.inv(palm) @ tip)[0, 3])
 
     def _open_pose_reach(self, link_name: str) -> float:
         """Palm-to-tip distance for ``link_name`` with the robot fully open."""

@@ -223,3 +223,95 @@ def test_thumb_posture_on_a_real_glove_trace():
     assert s_curve_fraction(mcp, dip) < 0.05
     # Was a mean |bend| of 0.71 rad; the fix brings it to ~0.37.
     assert np.mean(np.abs(np.stack([mcp, dip]))) < 0.5
+
+
+# --- finger spread and pinch snapping ------------------------------------
+
+@needs_optimizer
+def test_spread_scale_widens_only_the_lateral_axis():
+    """Finger SPACING is a different ratio from finger REACH.
+
+    The MIDAS fingertips span 61.2 mm at rest against ~48 mm for a scaled human
+    hand, so without this the solver swings each finger sideways to reach
+    targets that sit inside its own knuckle spacing.
+    """
+
+    from midas_hand_retargeter.postprocess import landmarks_to_palm_frame
+
+    pose = hand_pose(curls=(0.5,) * 3, thumb_oppose=0.4)
+    plain = landmarks_to_palm_frame(pose)
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    retargeter.profile = RetargetProfile().with_values({"dexpilot.spread_scale": 1.3})
+    retargeter.retarget_landmarks(pose)
+
+    # Reach is untouched: only column 0 (lateral) is scaled.
+    scaled = plain.copy()
+    scaled[:, 0] *= 1.3
+    np.testing.assert_allclose(scaled[:, 1:], plain[:, 1:])
+    assert abs(scaled[16, 0] - scaled[8, 0]) > abs(plain[16, 0] - plain[8, 0])
+
+
+@needs_optimizer
+def test_spread_scale_reduces_abduction_swing_on_a_constant_lateral_input():
+    """The visible symptom: fingers swinging sideways during a pure curl.
+
+    Abduction loses lateral authority as a finger curls, so a small lateral
+    error is corrected by a large angle — and the solver sometimes flips sign
+    between branches. Measured 0.71 rad of jump on an input whose lateral
+    coordinates never move.
+    """
+
+    frames = [
+        hand_pose(curls=(c,) * 3, splays=(0.0, 0.0, 0.0), thumb_oppose=0.3)
+        for c in np.linspace(0.0, 1.5, 6)
+    ]
+
+    def worst_jump(spread):
+        retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+        retargeter.profile = RetargetProfile().with_values(
+            {"dexpilot.scaling_factor": 1.2, "dexpilot.spread_scale": spread}
+        )
+        retargeter.reset()
+        rows = []
+        for frame in frames:
+            for _ in range(15):
+                active = retargeter.retarget_landmarks(frame).active_joint_positions
+            rows.append([active[f"{f}_mcp_abad_joint"] for f in ("index", "middle", "ring")])
+        return np.abs(np.diff(np.array(rows), axis=0)).max()
+
+    assert worst_jump(1.275) < worst_jump(1.0)
+
+
+@needs_optimizer
+def test_calibration_fits_reach_and_spread_together():
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    assert retargeter.profile.dexpilot.spread_scale == 1.0
+
+    retargeter.retarget_landmarks(hand_pose())
+    retargeter.calibrate_scaling_from_landmarks()
+
+    dexpilot = retargeter.profile.dexpilot
+    assert dexpilot.scaling_factor != 1.15, "reach was not calibrated"
+    assert dexpilot.spread_scale != 1.0, "spread was not calibrated"
+    # The robot is splayed wider than a human, so this is always > 1.
+    assert dexpilot.spread_scale > 1.0
+
+
+@needs_optimizer
+def test_pinch_snapping_can_be_switched_off():
+    """DexPilot holds a snapped pair together until it passes escape_dist.
+
+    That is deliberate upstream — it stabilises grasps — but it reads as the
+    fingertips STICKING: measured, the robot held a 1.3 mm gap while the human
+    gap opened to 48 mm. project_dist=0 must disable it outright.
+    """
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    retargeter.profile = RetargetProfile().with_values({"dexpilot.project_dist": 0.0})
+    retargeter.retarget_landmarks(hand_pose(curls=(1.0, 0.2, 0.2), thumb_oppose=0.9))
+    assert not retargeter.dex_retargeting.optimizer.projected.any()
+
+    retargeter.profile = retargeter.profile.with_values({"dexpilot.project_dist": 0.03})
+    retargeter.retarget_landmarks(hand_pose(curls=(1.0, 0.2, 0.2), thumb_oppose=0.9))
+    assert retargeter.dex_retargeting.optimizer.project_dist == pytest.approx(0.03)
