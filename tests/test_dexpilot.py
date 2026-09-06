@@ -230,3 +230,49 @@ def test_hold_applies_only_to_digits_the_profile_disabled():
     # ...and nothing else is.
     assert after.active_joint_positions["middle_pip_joint"] > held + 0.1
     assert after.active_joint_positions["ring_pip_joint"] > held + 0.1
+
+
+@needs_optimizer
+def test_scaling_calibration_measures_the_operator_hand():
+    """Zero-pose calibration for the knob this mode depends on most."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    assert retargeter.profile.dexpilot.scaling_factor == pytest.approx(1.15)
+
+    # A deliberately small hand: the scale must come out proportionally larger.
+    small = hand_pose() * 0.5
+    retargeter.retarget_landmarks(small)
+    small_scale = retargeter.calibrate_scaling_from_landmarks()
+
+    big = hand_pose() * 1.5
+    retargeter.retarget_landmarks(big)
+    big_scale = retargeter.calibrate_scaling_from_landmarks()
+
+    assert small_scale > big_scale, "a smaller hand needs a larger scale"
+    assert retargeter.profile.dexpilot.scaling_factor == pytest.approx(big_scale)
+
+
+@needs_optimizer
+def test_scaling_calibration_needs_a_frame_first():
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    with pytest.raises(RuntimeError, match="No landmark frame"):
+        retargeter.calibrate_scaling_from_landmarks()
+
+
+@needs_optimizer
+def test_zero_pose_calibration_works_in_dexpilot_too():
+    """The webcam path has had this since the start; solver modes need it too."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    pose = hand_pose(curls=(0.3,) * 3, thumb_oppose=0.2)
+    for _ in range(20):
+        before = retargeter.retarget_landmarks(pose)
+    assert np.abs(before.active_vector()).max() > 0.05
+
+    retargeter.calibrate_neutral_from_last_frame()
+    after = retargeter.retarget_landmarks(pose)
+    assert np.abs(after.active_vector()).max() < 0.05, "the held pose must become zero"
+
+    # ...without collapsing the usable range.
+    moved = retargeter.retarget_landmarks(hand_pose(curls=(1.2,) * 3, thumb_oppose=0.9))
+    assert np.abs(moved.active_vector()).max() > 0.3

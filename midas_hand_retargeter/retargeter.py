@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -106,6 +106,7 @@ class MidasHandRetargeter:
         self._postprocess_filter = JointTargetFilter()
         self._neutral_joint_offsets: dict[str, float] = {}
         self._last_uncalibrated_active_joint_positions: dict[str, float] = {}
+        self._last_landmarks: np.ndarray | None = None
         self.reset()
 
     def _build_optimizer(self) -> None:
@@ -176,6 +177,7 @@ class MidasHandRetargeter:
     def retarget_landmarks(self, landmarks: np.ndarray) -> RetargetingResult:
         """Retarget one 21x3 human landmark frame into MIDAS joint targets."""
 
+        self._last_landmarks = landmarks
         if self.config.mode == DEXPILOT_MODE and self.config.palm_frame_input:
             # See postprocess.landmarks_to_palm_frame: without this the solver
             # is handed targets rotated away from the robot's frame and rails.
@@ -375,6 +377,59 @@ class MidasHandRetargeter:
         if self._retargeting is None:
             return
         self._retargeting.set_qpos(np.asarray(robot_qpos, dtype=np.float32))
+
+    def calibrate_scaling_from_landmarks(
+        self, landmarks: np.ndarray | None = None
+    ) -> float:
+        """Set the DexPilot scaling from a held OPEN-hand pose.
+
+        The analytic map ignores hand size entirely; DexPilot does not, and
+        ``scaling_factor`` is the difference between fingers that never close
+        and fingers that curl into their limits. This measures it instead of
+        making the operator guess: hold the hand flat and open, and the scale
+        becomes the robot's reach over yours.
+
+        Uses the median over index/middle/ring. The thumb is deliberately
+        excluded: the MIDAS thumb reaches ~111 mm at its zero pose against a
+        human thumb's ~125 mm, the opposite correction the fingers need, so
+        including it biases the fit for every digit. That proportion mismatch
+        is real and one global scale cannot fix it.
+
+        Returns the scaling that was applied.
+        """
+
+        if landmarks is None:
+            landmarks = self._last_landmarks
+        if landmarks is None:
+            raise RuntimeError("No landmark frame available to calibrate from")
+
+        points = landmarks_to_palm_frame(landmarks)
+        ratios = []
+        for finger, tip_index in (("index", 8), ("middle", 12), ("ring", 16)):
+            human = float(np.linalg.norm(points[tip_index]))
+            robot = self._open_pose_reach(f"{finger}_tip")
+            if human > 1e-3 and robot > 0:
+                ratios.append(robot / human)
+        if not ratios:
+            raise RuntimeError("Could not measure hand size from this frame")
+
+        scaling = float(np.median(ratios))
+        self._profile = replace(
+            self._profile, dexpilot=replace(self._profile.dexpilot, scaling_factor=scaling)
+        )
+        logger.info("Calibrated DexPilot scaling_factor to %.3f", scaling)
+        return scaling
+
+    def _open_pose_reach(self, link_name: str) -> float:
+        """Palm-to-tip distance for ``link_name`` with the robot fully open."""
+
+        if self._retargeting is None:
+            return 0.0
+        robot = self._retargeting.optimizer.robot
+        robot.compute_forward_kinematics(np.zeros(robot.dof))
+        palm = robot.get_link_pose(robot.get_link_index(self.config.wrist_link_name))
+        tip = robot.get_link_pose(robot.get_link_index(link_name))
+        return float(np.linalg.norm((np.linalg.inv(palm) @ tip)[:3, 3]))
 
     def _build_fixed_qpos(self) -> np.ndarray:
         return np.asarray(
