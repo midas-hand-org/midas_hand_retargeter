@@ -2,6 +2,9 @@
 
 ## 0.2.0 (unreleased)
 
+**Milestone: this retargeting drove the physical MIDAS hand from a Manus
+glove.** `mode="dexpilot"` with a tuned preset, on hardware, end to end.
+
 ### Added — DexPilot mode
 
 - **`mode="dexpilot"`**, and it is now the recommended mode for glove teleop.
