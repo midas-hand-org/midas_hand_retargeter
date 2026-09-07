@@ -422,3 +422,64 @@ def test_bounding_abduction_removes_curl_driven_lean():
         return max(max(v) - min(v) for v in seen)
 
     assert swing(0.25) < 0.6 * swing(1.57)
+
+
+@needs_optimizer
+def test_the_pinch_snap_actually_fires_on_a_real_pinch():
+    """The projection test compares the RAW human landmark distance, so
+    project_dist is in operator units -- and landmarks sit inside the fingers,
+    so a full skin-contact pinch still reports ~10 mm. Set project_dist below
+    that and the snap never fires: the target stays at human x scaling and the
+    pair keeps weight 1 instead of 200. Measured on this trace, that is a 26 mm
+    robot fingertip gap on a pinch the operator felt as contact.
+    """
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    optimizer = retargeter.dex_retargeting.optimizer
+
+    def snapped_frames(project_dist, escape_dist):
+        retargeter.profile = retargeter.profile.with_values(
+            {"dexpilot.project_dist": project_dist, "dexpilot.escape_dist": escape_dist}
+        )
+        retargeter.reset()
+        count = 0
+        for frame in _TRACE_FRAMES:
+            retargeter.retarget_landmarks(frame)
+            count += int(bool(optimizer.projected[0]))   # vector 0 = thumb-index
+        return count
+
+    # The default must fire on the pinches this trace contains.
+    assert snapped_frames(0.020, 0.024) > 0
+    # Below the operator's landmark floor it can never fire, which is the bug.
+    assert snapped_frames(0.005, 0.050) == 0
+
+
+@needs_optimizer
+def test_escape_dist_must_exceed_project_dist():
+    """Inverting them removes the hysteresis rather than erroring: a distance
+    between the two is set projected on one line and cleared on the next, so
+    the pair chatters at the escape threshold. Easy to do by dragging one
+    slider past the other."""
+
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
+    retargeter.profile = retargeter.profile.with_values(
+        {"dexpilot.project_dist": 0.03, "dexpilot.escape_dist": 0.01}
+    )
+    retargeter.retarget_landmarks(_TRACE_FRAMES[0])
+    optimizer = retargeter.dex_retargeting.optimizer
+    assert optimizer.escape_dist > optimizer.project_dist
+    assert "inverted_hysteresis" in retargeter._warned
+
+
+@needs_optimizer
+def test_the_default_hysteresis_band_is_narrow():
+    """The upstream 0.03/0.05 pair held a pair snapped through a 20 mm swing of
+    human separation -- 33.5% of frames on a real trace, which is the sticking
+    an operator reports as fingertips clinging together."""
+
+    from midas_hand_retargeter.params import DexPilotParams
+
+    params = DexPilotParams()
+    assert params.escape_dist > params.project_dist
+    band = params.escape_dist - params.project_dist
+    assert 0.0 < band <= 0.010, f"hysteresis band is {band * 1000:.0f} mm"

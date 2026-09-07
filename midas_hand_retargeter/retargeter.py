@@ -577,7 +577,23 @@ class MidasHandRetargeter:
 
         optimizer.norm_delta = float(params.norm_delta)
         optimizer.project_dist = float(params.project_dist)
-        optimizer.escape_dist = float(params.escape_dist)
+        escape = float(params.escape_dist)
+        if escape <= params.project_dist:
+            # Not fatal, but it silently removes the hysteresis: a distance
+            # between the two is set projected on one line and cleared on the
+            # next, so the pair chatters at the escape threshold instead of
+            # latching. Easy to reach by dragging one slider past the other,
+            # and invisible without this. Warn, then keep a usable band.
+            escape = float(params.project_dist) * 1.2
+            self._warn_once(
+                "inverted_hysteresis",
+                "escape_dist (%.3f) must exceed project_dist (%.3f) or pinch "
+                "detection has no hysteresis and chatters. Using %.3f.",
+                params.escape_dist,
+                params.project_dist,
+                escape,
+            )
+        optimizer.escape_dist = escape
 
         if self._dexpilot_huber != params.huber_delta:
             import torch

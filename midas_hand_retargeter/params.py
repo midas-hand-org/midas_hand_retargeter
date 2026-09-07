@@ -158,10 +158,31 @@ class DexPilotParams:
     #: Distance (m) at which a fingertip pair is treated as *trying to touch*
     #: and its target distance snaps to eta1/eta2. This is what makes pinches
     #: land precisely instead of hovering.
-    project_dist: float = 0.03
+    #:
+    #: **Compared against the RAW, unscaled human landmark distance**, not the
+    #: scaled target -- so it is in operator units and does not move when
+    #: scaling_factor does. That matters more than it sounds: landmarks sit
+    #: *inside* the fingers, so a full skin-contact pinch still reports a
+    #: nonzero gap. Measured on one operator's glove: thumb-to-index bottoms
+    #: out at 10.4 mm. Set below that and the pair never projects at all, the
+    #: target stays at ``human x scaling`` and the pair keeps weight 1 instead
+    #: of 200 -- which on a real trace left a 26 mm fingertip gap on a pinch
+    #: the operator felt as contact.
+    project_dist: float = 0.020
     #: Distance (m) at which a projected pair is released again. Must exceed
-    #: project_dist; the gap is hysteresis against chattering in and out.
-    escape_dist: float = 0.05
+    #: project_dist; the gap between them is hysteresis against chattering.
+    #:
+    #: **This is the stickiness knob**, and it is the one to reach for when
+    #: pinched fingertips cling to each other. A wide band holds the pair
+    #: snapped long after the operator has opened their hand: at the upstream
+    #: 0.03/0.05 pair, a real trace spent 33.5% of its frames snapped while the
+    #: human gap was already past 25 mm. Narrowing the band to 0.020/0.024
+    #: takes that to 0.0% while keeping the pinch itself tight (fingertip gap
+    #: 1.1 mm), with 3-4 clean snap episodes per trace and no chatter.
+    #:
+    #: Lowering *project_dist* to escape the stickiness is the intuitive move
+    #: and the wrong one -- it disables the snap instead of releasing it.
+    escape_dist: float = 0.024
     #: Projected target distance for thumb-to-finger pairs (m).
     eta1: float = 1e-4
     #: Projected target distance for finger-to-finger pairs (m).
