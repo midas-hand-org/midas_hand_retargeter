@@ -176,11 +176,7 @@ class MidasRetargeterConfig:
         # default to modelling the real coupling.
         coupling = self.coupling_mode
         if coupling is None:
-            coupling = (
-                PIP_DIP_LOOKUP_MODE
-                if self.mode in _OPTIMIZER_MODES
-                else FIXED_PASSIVE_MODE
-            )
+            coupling = PIP_DIP_LOOKUP_MODE if self.mode in _OPTIMIZER_MODES else FIXED_PASSIVE_MODE
         object.__setattr__(self, "coupling_mode", normalize_coupling_mode(coupling))
 
         if self.mode in _OPTIMIZER_ONLY_MODES and (
@@ -215,8 +211,7 @@ class MidasRetargeterConfig:
             ):
                 if getattr(self, name) != default:
                     raise ValueError(
-                        f"{name} only applies to mode={DEXPILOT_MODE!r}, "
-                        f"not mode={self.mode!r}."
+                        f"{name} only applies to mode={DEXPILOT_MODE!r}, not mode={self.mode!r}."
                     )
         else:
             # The mirror image of the check above, and it was missing. In

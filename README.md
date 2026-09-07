@@ -11,11 +11,11 @@ import numpy as np
 from midas_hand_retargeter import MidasHandRetargeter
 
 retargeter = MidasHandRetargeter.create()
-result = retargeter.retarget_landmarks(landmarks)   # (21, 3), MediaPipe order
+result = retargeter.retarget_landmarks(landmarks)  # (21, 3), MediaPipe order
 
-result.active_joint_positions      # {joint_name: radians}, 13 entries
-result.hardware_motor_positions    # (13,) in motor order, thumb first
-result.mujoco_control_dict()       # {joint_name: target} for MuJoCo actuators
+result.active_joint_positions  # {joint_name: radians}, 13 entries
+result.hardware_motor_positions  # (13,) in motor order, thumb first
+result.mujoco_control_dict()  # {joint_name: target} for MuJoCo actuators
 ```
 
 The default install needs only numpy. It reads no files and requires no robot
@@ -59,13 +59,15 @@ has no pinky.
 ```python
 from midas_hand_retargeter import RetargetProfile
 
-profile = RetargetProfile().with_values({
-    "index.curl_gain": 1.3,             # close sooner
-    "index.mcp_pitch_range": (0.0, -1.8),   # reach the full URDF travel
-    "ring.splay_gain": 0.8,
-    "thumb.cmc_roll_span": 0.5,
-})
-retargeter.profile = profile            # atomic; safe to swap mid-run
+profile = RetargetProfile().with_values(
+    {
+        "index.curl_gain": 1.3,  # close sooner
+        "index.mcp_pitch_range": (0.0, -1.8),  # reach the full URDF travel
+        "ring.splay_gain": 0.8,
+        "thumb.cmc_roll_span": 0.5,
+    }
+)
+retargeter.profile = profile  # atomic; safe to swap mid-run
 ```
 
 **62 parameters** (`PARAMETER_COUNT`): 50 per-digit analytic ones across
@@ -83,8 +85,11 @@ For a live UI over these, see `midas-hand-tune` in
 ```python
 from midas_hand_retargeter import presets
 
-presets.save("~/.midas_hand/retarget_presets/pinch.json", profile,
-             neutral_offsets=retargeter.neutral_joint_offsets)
+presets.save(
+    "~/.midas_hand/retarget_presets/pinch.json",
+    profile,
+    neutral_offsets=retargeter.neutral_joint_offsets,
+)
 profile, neutral = presets.load("~/.midas_hand/retarget_presets/pinch.json")
 ```
 

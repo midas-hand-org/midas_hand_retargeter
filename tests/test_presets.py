@@ -49,8 +49,9 @@ def test_save_and_load_round_trip_by_name(tmp_path):
     saved = RetargetProfile().with_values(
         {"dexpilot.scaling_factor": 1.23, "dexpilot.abduction_limit": 0.11}
     )
-    presets.save(presets.resolve("rt", directory=tmp_path), saved,
-                 neutral_offsets={"index_pip_joint": -0.25})
+    presets.save(
+        presets.resolve("rt", directory=tmp_path), saved, neutral_offsets={"index_pip_joint": -0.25}
+    )
 
     loaded, neutral = presets.load(presets.resolve("rt", directory=tmp_path))
     assert loaded.dexpilot.scaling_factor == 1.23

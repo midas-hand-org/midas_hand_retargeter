@@ -29,10 +29,12 @@ def _synthetic_open_hand_landmarks() -> np.ndarray:
 def smoke_main() -> None:
     parser = argparse.ArgumentParser(description="Run a one-frame MIDAS retargeting smoke test.")
     parser.add_argument(
-        "--mode", default=ANALYTIC_MODE, choices=list(SUPPORTED_RETARGET_MODES),
+        "--mode",
+        default=ANALYTIC_MODE,
+        choices=list(SUPPORTED_RETARGET_MODES),
         help="Retargeting mode. The default needs nothing but numpy; the others "
-             "need the [vector] extra and a URDF, and only they read --urdf, "
-             "--mujoco-repo and --scaling-factor.",
+        "need the [vector] extra and a URDF, and only they read --urdf, "
+        "--mujoco-repo and --scaling-factor.",
     )
     parser.add_argument("--urdf", default=None, help="Optional explicit MIDAS URDF path.")
     parser.add_argument("--mujoco-repo", default=None, help="Optional MIDAS MuJoCo repo path.")

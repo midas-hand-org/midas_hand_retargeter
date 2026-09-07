@@ -394,6 +394,6 @@ def landmarks_to_palm_frame(landmarks: np.ndarray) -> np.ndarray:
     points = as_landmarks(landmarks)
     relative = points - points[0]
     forward, lateral, normal = _palm_basis(points)
-    return np.stack(
-        [relative @ lateral, relative @ forward, relative @ normal], axis=1
-    ).astype(np.float64)
+    return np.stack([relative @ lateral, relative @ forward, relative @ normal], axis=1).astype(
+        np.float64
+    )

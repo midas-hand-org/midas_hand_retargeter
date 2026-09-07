@@ -89,12 +89,8 @@ def test_analytic_matches_refine_exactly():
     # now default differently — the Cartesian modes need the real four-bar
     # coupling for their fingertip FK — which would show up as a legitimate
     # difference in the passive slots of robot_qpos.
-    analytic = MidasHandRetargeter.create(
-        mode=ANALYTIC_MODE, coupling_mode=FIXED_PASSIVE_MODE
-    )
-    refine = MidasHandRetargeter.create(
-        mode=REFINE_MODE, coupling_mode=FIXED_PASSIVE_MODE
-    )
+    analytic = MidasHandRetargeter.create(mode=ANALYTIC_MODE, coupling_mode=FIXED_PASSIVE_MODE)
+    refine = MidasHandRetargeter.create(mode=REFINE_MODE, coupling_mode=FIXED_PASSIVE_MODE)
 
     for name, landmarks in GOLDEN_POSES:
         left = analytic.retarget_landmarks(landmarks)

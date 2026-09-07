@@ -64,7 +64,10 @@ def test_no_passive_dip_is_ever_commanded_to_a_motor():
     """The finger DIPs are passive four-bar links with no servo, so the
     coupling cannot reach the hardware even if it were wrong."""
 
-    assert not [n for n in HARDWARE_MOTOR_JOINT_NAMES if n.endswith("_dip_joint")
-                and not n.startswith("thumb")]
+    assert not [
+        n
+        for n in HARDWARE_MOTOR_JOINT_NAMES
+        if n.endswith("_dip_joint") and not n.startswith("thumb")
+    ]
     # The thumb DIP is genuinely motor-driven, and is not part of the four-bar.
     assert "thumb_dip_joint" in HARDWARE_MOTOR_JOINT_NAMES

@@ -28,9 +28,9 @@ from ._poses import hand_pose
 
 #: A real 200-frame glove recording; see test_bounding_abduction_removes_curl_driven_lean
 #: for why the synthetic poses cannot stand in for it here.
-_TRACE_FRAMES = np.load(
-    pathlib.Path(__file__).parent / "goldens" / "glove_trace_thumb.npz"
-)["frames"]
+_TRACE_FRAMES = np.load(pathlib.Path(__file__).parent / "goldens" / "glove_trace_thumb.npz")[
+    "frames"
+]
 
 needs_optimizer = pytest.mark.skipif(
     importlib.util.find_spec("dex_retargeting") is None,
@@ -97,12 +97,8 @@ def test_objective_includes_pairwise_fingertip_vectors():
     tip_landmarks = {4, 8, 12, 16}
     # Base-rooted vectors start at a palm landmark; the thumb's is rebased onto
     # the thumb CMC (landmark 1), the others stay at the wrist (landmark 0).
-    base_rooted = [
-        (o, t) for o, t in zip(origins, tasks, strict=True) if o not in tip_landmarks
-    ]
-    inter_finger = [
-        (o, t) for o, t in zip(origins, tasks, strict=True) if o in tip_landmarks
-    ]
+    base_rooted = [(o, t) for o, t in zip(origins, tasks, strict=True) if o not in tip_landmarks]
+    inter_finger = [(o, t) for o, t in zip(origins, tasks, strict=True) if o in tip_landmarks]
     assert len(base_rooted) == 4
     assert len(inter_finger) == 6, "the pairwise terms are the whole point"
 
@@ -124,9 +120,7 @@ def test_solver_params_apply_live_without_a_rebuild():
     assert optimizer.scaling == pytest.approx(1.8)
     # eta1/eta2 are baked into a projection cache at construction, so the cache
     # has to be recomputed for them to take effect at all.
-    np.testing.assert_allclose(
-        optimizer.projected_dist, [0.02, 0.02, 0.02, 0.06, 0.06, 0.06]
-    )
+    np.testing.assert_allclose(optimizer.projected_dist, [0.02, 0.02, 0.02, 0.06, 0.06, 0.06])
 
 
 @needs_optimizer
@@ -138,9 +132,7 @@ def test_scaling_factor_actually_changes_the_pose():
 
     poses = {}
     for scaling in (1.0, 2.0):
-        retargeter.profile = RetargetProfile().with_values(
-            {"dexpilot.scaling_factor": scaling}
-        )
+        retargeter.profile = RetargetProfile().with_values({"dexpilot.scaling_factor": scaling})
         retargeter.reset()
         for _ in range(20):
             result = retargeter.retarget_landmarks(pose)
@@ -160,9 +152,7 @@ def test_recovers_reachable_fingertip_targets():
     # palm_frame_input=False: this test supplies fingertip positions already in
     # the robot's palm frame, and populates only the tip landmarks, so the
     # palm basis (built from the MCPs) would be degenerate.
-    retargeter = MidasHandRetargeter.create(
-        mode=DEXPILOT_MODE, palm_frame_input=False
-    )
+    retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE, palm_frame_input=False)
     retargeter.profile = RetargetProfile().with_values({"dexpilot.scaling_factor": 1.0})
     robot = retargeter.dex_retargeting.optimizer.robot
 
@@ -190,9 +180,9 @@ def test_recovers_reachable_fingertip_targets():
     # wrist-rooted human vector against a CMC-rooted robot one, a ~66 mm bias.
     robot.compute_forward_kinematics(np.asarray(source, dtype=float))
     palm_inverse = np.linalg.inv(robot.get_link_pose(robot.get_link_index("palm_base")))
-    landmarks[1] = (
-        palm_inverse @ robot.get_link_pose(robot.get_link_index("thumb_cmc_side"))
-    )[:3, 3]
+    landmarks[1] = (palm_inverse @ robot.get_link_pose(robot.get_link_index("thumb_cmc_side")))[
+        :3, 3
+    ]
 
     retargeter.reset()
     for _ in range(30):
@@ -207,8 +197,8 @@ def test_recovers_reachable_fingertip_targets():
             for b in TIPS[i + 1 :]
         ]
     )
-    assert tip_error < 0.010, f"tip error {tip_error*1000:.1f} mm"
-    assert spacing_error < 0.010, f"inter-fingertip spacing error {spacing_error*1000:.1f} mm"
+    assert tip_error < 0.010, f"tip error {tip_error * 1000:.1f} mm"
+    assert spacing_error < 0.010, f"inter-fingertip spacing error {spacing_error * 1000:.1f} mm"
 
 
 @needs_optimizer
@@ -349,7 +339,6 @@ def test_cartesian_modes_model_the_passive_four_bar_coupling():
     assert np.linalg.norm(uncoupled - coupled) > 0.03, "coupling must move the tip"
 
 
-
 @needs_optimizer
 def test_abduction_is_bounded_by_default():
     """The default policy narrows abduction well inside the URDF's range."""
@@ -411,9 +400,7 @@ def test_bounding_abduction_removes_curl_driven_lean():
     retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
 
     def swing(limit):
-        retargeter.profile = retargeter.profile.with_values(
-            {"dexpilot.abduction_limit": limit}
-        )
+        retargeter.profile = retargeter.profile.with_values({"dexpilot.abduction_limit": limit})
         retargeter.reset()
         seen = [[] for _ in ABDUCTION_JOINT_NAMES]
         for frame in _TRACE_FRAMES[::4]:
@@ -446,7 +433,7 @@ def test_the_pinch_snap_actually_fires_on_a_real_pinch():
         count = 0
         for frame in _TRACE_FRAMES:
             retargeter.retarget_landmarks(frame)
-            count += int(bool(optimizer.projected[0]))   # vector 0 = thumb-index
+            count += int(bool(optimizer.projected[0]))  # vector 0 = thumb-index
         return count
 
     # The default must fire on the pinches this trace contains.

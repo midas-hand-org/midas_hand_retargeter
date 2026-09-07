@@ -81,11 +81,20 @@ def test_the_dead_postprocess_constants_are_gone():
     from midas_hand_retargeter import postprocess
 
     for name in (
-        "FINGER_MCP_PITCH_RANGE", "FINGER_PIP_RANGE", "FINGER_ABAD_DEADZONE",
-        "FINGER_ABAD_LIMIT", "FINGER_ABAD_CURL_DAMPING", "THUMB_CMC_ROLL_RANGE",
-        "THUMB_CMC_ROLL_DEADZONE", "THUMB_CMC_ROLL_SPAN", "THUMB_CMC_SIDE_OPEN",
-        "THUMB_CMC_SIDE_RANGE", "THUMB_CMC_SIDE_NEUTRAL_ANGLE",
-        "THUMB_CMC_SIDE_DEADZONE", "THUMB_MCP_RANGE", "THUMB_DIP_RANGE",
+        "FINGER_MCP_PITCH_RANGE",
+        "FINGER_PIP_RANGE",
+        "FINGER_ABAD_DEADZONE",
+        "FINGER_ABAD_LIMIT",
+        "FINGER_ABAD_CURL_DAMPING",
+        "THUMB_CMC_ROLL_RANGE",
+        "THUMB_CMC_ROLL_DEADZONE",
+        "THUMB_CMC_ROLL_SPAN",
+        "THUMB_CMC_SIDE_OPEN",
+        "THUMB_CMC_SIDE_RANGE",
+        "THUMB_CMC_SIDE_NEUTRAL_ANGLE",
+        "THUMB_CMC_SIDE_DEADZONE",
+        "THUMB_MCP_RANGE",
+        "THUMB_DIP_RANGE",
         "THUMB_DIP_MCP_FOLLOW",
     ):
         assert not hasattr(postprocess, name), f"{name} came back"

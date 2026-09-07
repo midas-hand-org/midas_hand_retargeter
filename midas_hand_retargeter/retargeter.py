@@ -371,9 +371,7 @@ class MidasHandRetargeter:
             index = self._joint_index_by_name.get(name)
             if index is None:
                 continue
-            qpos[index] = self._postprocess_filter.update(
-                name, float(qpos[index]), alpha
-            )
+            qpos[index] = self._postprocess_filter.update(name, float(qpos[index]), alpha)
         return qpos
 
     #: Index of DexPilot's ``wrist -> thumb_tip`` vector. Its objective is six
@@ -454,9 +452,7 @@ class MidasHandRetargeter:
         # SeqRetargeting clips the warm start against its OWN copy of the
         # limits, so the two must agree or nlopt rejects the start point.
         self._retargeting.joint_limits = limits.astype(np.float32)
-        self._retargeting.set_qpos(
-            np.zeros(len(self.robot_joint_names), dtype=np.float32)
-        )
+        self._retargeting.set_qpos(np.zeros(len(self.robot_joint_names), dtype=np.float32))
 
     def _apply_solver_bounds(self) -> None:
         """Install the MIDAS joint-limit policies on a freshly built solver.
@@ -517,9 +513,7 @@ class MidasHandRetargeter:
         optimizer.task_link_indices = torch.tensor(
             [optimizer.computed_link_names.index(name) for name in tasks]
         )
-        optimizer.computed_link_indices = optimizer.get_link_indices(
-            optimizer.computed_link_names
-        )
+        optimizer.computed_link_indices = optimizer.get_link_indices(optimizer.computed_link_names)
 
         # The human side must be rebased to match, or the two sides of the
         # comparison measure different things.
@@ -548,13 +542,16 @@ class MidasHandRetargeter:
         # the solver barely moves — a scaling slider would feel dead. Drop the
         # warm start when the parameters themselves change (not every frame).
         signature = (
-            params.scaling_factor, params.huber_delta, params.norm_delta,
-            params.project_dist, params.escape_dist, params.eta1, params.eta2,
+            params.scaling_factor,
+            params.huber_delta,
+            params.norm_delta,
+            params.project_dist,
+            params.escape_dist,
+            params.eta1,
+            params.eta2,
         )
         if self._dexpilot_signature is not None and signature != self._dexpilot_signature:
-            self._retargeting.set_qpos(
-                np.zeros(len(self.robot_joint_names), dtype=np.float32)
-            )
+            self._retargeting.set_qpos(np.zeros(len(self.robot_joint_names), dtype=np.float32))
         self._dexpilot_signature = signature
 
         # dex_retargeting multiplies the (10, 3) target vectors by `scaling`, so
@@ -637,9 +634,7 @@ class MidasHandRetargeter:
             return
         self._retargeting.set_qpos(np.asarray(robot_qpos, dtype=np.float32))
 
-    def calibrate_scaling_from_landmarks(
-        self, landmarks: np.ndarray | None = None
-    ) -> float:
+    def calibrate_scaling_from_landmarks(self, landmarks: np.ndarray | None = None) -> float:
         """Set the DexPilot scaling from a held OPEN-hand pose.
 
         The analytic map ignores hand size entirely; DexPilot does not, and
@@ -695,17 +690,13 @@ class MidasHandRetargeter:
         # spans 61.2 mm against a scaled human's ~48 mm.
         spread = 1.0
         human_span = float(abs(points[16][0] - points[8][0]))
-        robot_span = abs(
-            self._open_pose_lateral("ring_tip") - self._open_pose_lateral("index_tip")
-        )
+        robot_span = abs(self._open_pose_lateral("ring_tip") - self._open_pose_lateral("index_tip"))
         if human_span > 1e-3 and robot_span > 0:
             spread = float(robot_span / (human_span * scaling))
 
         self._profile = replace(
             self._profile,
-            dexpilot=replace(
-                self._profile.dexpilot, scaling_factor=scaling, spread_scale=spread
-            ),
+            dexpilot=replace(self._profile.dexpilot, scaling_factor=scaling, spread_scale=spread),
         )
         logger.info(
             "Calibrated DexPilot scaling_factor to %.3f and spread_scale to %.3f",

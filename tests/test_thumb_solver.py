@@ -67,6 +67,7 @@ def _synthetic_sweep():
 
 # --- policy plumbing, no solver required ---------------------------------
 
+
 def test_thumb_policies_default_on_for_dexpilot():
     config = MidasRetargeterConfig(mode=DEXPILOT_MODE)
     assert config.thumb_flexion_only is True
@@ -88,6 +89,7 @@ def test_analytic_mode_has_no_solver_narrowing():
 
 
 # --- the two fixes -------------------------------------------------------
+
 
 @needs_optimizer
 def test_solver_cannot_hyperextend_the_thumb():
@@ -202,6 +204,7 @@ def test_thumb_vector_scale_touches_only_the_thumb_rows():
 
 # --- regression against real glove data ----------------------------------
 
+
 @needs_optimizer
 def test_thumb_posture_on_a_real_glove_trace():
     """Guards the measured result against a 200-frame slice of a real capture.
@@ -215,9 +218,7 @@ def test_thumb_posture_on_a_real_glove_trace():
     frames = np.load(TRACE)["frames"]
 
     retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
-    retargeter.profile = RetargetProfile().with_values(
-        {"dexpilot.scaling_factor": 1.2}
-    )
+    retargeter.profile = RetargetProfile().with_values({"dexpilot.scaling_factor": 1.2})
     mcp, dip = _sweep(retargeter, frames)
 
     assert mcp.max() <= BOUND_EPSILON, "thumb hyperextended on real data"
@@ -228,6 +229,7 @@ def test_thumb_posture_on_a_real_glove_trace():
 
 
 # --- finger spread and pinch snapping ------------------------------------
+
 
 @needs_optimizer
 def test_spread_scale_widens_only_the_lateral_axis():
