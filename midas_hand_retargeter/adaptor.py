@@ -22,12 +22,10 @@ import numpy as np
 
 from .constants import FINGER_NAMES
 from .coupling import (
-    COUPLED_PIP_DIP_MODE,
     FIXED_PASSIVE_MODE,
     PIP_DIP_LOOKUP_MODE,
     SUPPORTED_COUPLING_MODES,
     LookupPassiveCoupling,
-    PipDipJointCoupling,
     couplings_for,
     normalize_coupling_mode,
 )
@@ -35,12 +33,10 @@ from .coupling import (
 # ruff: noqa: F822 - MidasCoupledKinematicAdaptor is resolved lazily by the
 # module __getattr__ below, so it is exported but not defined at module level.
 __all__ = [
-    "COUPLED_PIP_DIP_MODE",
     "FIXED_PASSIVE_MODE",
     "PIP_DIP_LOOKUP_MODE",
     "SUPPORTED_COUPLING_MODES",
     "MidasCoupledKinematicAdaptor",
-    "PipDipJointCoupling",
     "build_midas_kinematic_adaptor",
     "normalize_coupling_mode",
 ]

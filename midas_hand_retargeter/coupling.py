@@ -34,10 +34,7 @@ from .constants import FINGER_NAMES
 
 FIXED_PASSIVE_MODE = "fixed_passive"
 PIP_DIP_LOOKUP_MODE = "pip_dip_lookup"
-#: Historical alias for ``pip_dip_lookup``; accepted, not recommended.
-COUPLED_PIP_DIP_MODE = "coupled_pip_dip"
-OPTION_2_COUPLING_MODES = (PIP_DIP_LOOKUP_MODE, COUPLED_PIP_DIP_MODE)
-SUPPORTED_COUPLING_MODES = (FIXED_PASSIVE_MODE, *OPTION_2_COUPLING_MODES)
+SUPPORTED_COUPLING_MODES = (FIXED_PASSIVE_MODE, PIP_DIP_LOOKUP_MODE)
 
 
 def normalize_coupling_mode(mode: str) -> str:
