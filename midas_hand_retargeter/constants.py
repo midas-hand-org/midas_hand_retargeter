@@ -44,14 +44,6 @@ HARDWARE_MOTOR_JOINT_NAMES = (
     "ring_mcp_abad_joint",
 )
 
-PASSIVE_FIXED_JOINT_NAMES = (
-    "index_dip_linkage_joint",
-    "index_dip_joint",
-    "middle_dip_linkage_joint",
-    "middle_dip_joint",
-    "ring_dip_linkage_joint",
-    "ring_dip_joint",
-)
 
 # Baseline vector task based on the working Jun/dex-retargeting teleop setup:
 # every vector starts at the palm/wrist frame and targets each fingertip plus
