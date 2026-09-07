@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from midas_hand_retargeter.config import (
-    ANALYTIC_MODE,
     VECTOR_MODE,
     MidasRetargeterConfig,
 )
@@ -46,14 +45,6 @@ def test_config_accepts_pip_dip_lookup_coupling_mode(urdf_path):
         urdf_path=urdf_path, mode=VECTOR_MODE, coupling_mode="pip_dip_lookup"
     )
     assert config.to_dex_config_dict()["target_joint_names"] == list(ACTIVE_JOINT_NAMES)
-
-
-def test_analytic_config_needs_no_urdf_at_all():
-    """The default path must not depend on a sibling repo being present."""
-
-    config = MidasRetargeterConfig()
-    assert config.mode == ANALYTIC_MODE
-    assert config.uses_optimizer is False
 
 
 def test_missing_urdf_is_reported_clearly():

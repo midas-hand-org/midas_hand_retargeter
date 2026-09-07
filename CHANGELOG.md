@@ -104,8 +104,11 @@ glove.** `mode="dexpilot"` with a tuned preset, on hardware, end to end.
 - `presets.save/load`: JSON profiles that carry the neutral calibration
   (previously in-memory only and lost on exit) and are validated against the
   robot's joint limits.
-- `HandModel`: solver-free joint names, limits and index lookup, CI-checked
-  against the URDF, the MJCF and pinocchio's dof ordering.
+- `HandModel`: solver-free joint names, limits and index lookup, with tests
+  asserting the checked-in table still equals the URDF, the MJCF and
+  pinocchio's dof ordering. Those three tests need the sibling
+  `midas_hand_mujoco` repo and CI does not check it out, so they skip there --
+  run them locally before trusting the table.
 - `analytic_debug()` and `palm_basis()` for tuning UIs and diagnostics.
 - `tests/goldens/`: a 45-pose behaviour freeze for the analytic layer.
 

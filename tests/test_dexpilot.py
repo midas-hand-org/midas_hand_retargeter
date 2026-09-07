@@ -244,6 +244,7 @@ def test_hold_applies_only_to_digits_the_profile_disabled():
     for _ in range(30):
         before = retargeter.retarget_landmarks(curled)
     held = before.active_joint_positions["index_pip_joint"]
+    assert held < -0.5, "fixture should leave the index finger clearly curled"
 
     retargeter.profile = retargeter.profile.with_values({"index.enabled": False})
     after = retargeter.retarget_landmarks(hand_pose(curls=(0.0, 0.0, 0.0)))

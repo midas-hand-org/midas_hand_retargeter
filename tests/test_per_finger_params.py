@@ -101,23 +101,6 @@ def test_legacy_tuning_still_drives_every_finger():
     assert legacy == modern
 
 
-def test_disabled_finger_holds_its_last_command():
-    """Disabling must freeze the finger, not fling it open."""
-
-    retargeter = MidasHandRetargeter.create()
-    curled = hand_pose(curls=(1.2, 1.2, 1.2))
-    for _ in range(30):  # let the smoothing filter settle
-        result = retargeter.retarget_landmarks(curled)
-    held = result.active_joint_positions["index_pip_joint"]
-    assert held < -0.5, "fixture should leave the index finger clearly curled"
-
-    retargeter.profile = retargeter.profile.with_values({"index.enabled": False})
-    after = retargeter.retarget_landmarks(hand_pose(curls=(0.0, 0.0, 0.0)))
-
-    assert after.active_joint_positions["index_pip_joint"] == pytest.approx(held)
-    assert after.active_joint_positions["middle_pip_joint"] > held + 0.1
-
-
 def test_profile_store_edits_are_atomic_and_undoable():
     store = ProfileStore()
     assert store.get().index.curl_gain == 1.0

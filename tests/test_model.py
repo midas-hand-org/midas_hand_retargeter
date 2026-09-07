@@ -1,10 +1,15 @@
 """The checked-in HandModel table must stay equal to the shipped robot model.
 
 The table in ``model.py`` is a literal so the analytic path needs no URDF and
-no pinocchio. That speed comes with a drift risk, which these tests remove:
+no pinocchio. That speed comes with a drift risk, and these tests are the guard:
 they assert the literal still equals the URDF, the MJCF, and — when pinocchio
 is installed — pinocchio's own dof ordering, which is the index space of the
 public ``RetargetingResult.robot_qpos``.
+
+**They SKIP without the sibling ``midas_hand_mujoco`` repo, and CI does not
+check it out**, so run them locally before trusting the table. Three of the six
+skip in CI today. Closing that gap means giving the workflow access to that
+repo, which is a cross-repo decision, not a test change.
 """
 
 from __future__ import annotations
