@@ -30,7 +30,6 @@ dev = ["pytest"]
 
 [project.urls]
 Homepage = "https://github.com/midas-hand-org/midas_hand_retargeter"
-Source = "https://github.com/midas-hand-org/midas_hand_retargeter"
 
 [project.scripts]
 midas-retargeter-smoke = "midas_hand_retargeter.cli:smoke_main"
