@@ -20,7 +20,7 @@ def _straight_landmarks() -> np.ndarray:
         landmarks[base + 3] = [x, 0.105, 0.0]
     # Thumb: straight (colinear segments) and in-plane (z=0) so MCP/DIP flexion
     # and CMC roll are zero. The proximal direction sits at the tuned neutral
-    # side angle (THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3 rad, i.e. x:y ~= -0.31) so
+    # side angle (ThumbParams.cmc_side_neutral_angle = -0.3 rad, x:y ~= -0.31) so
     # a relaxed thumb maps to zero CMC side. (The previous fixture pointed the
     # thumb at ~-0.84 rad — the pre-87e2061 neutral — so it no longer read as
     # neutral after the pinching retune.)

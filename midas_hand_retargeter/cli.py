@@ -6,6 +6,7 @@ import argparse
 
 import numpy as np
 
+from .config import ANALYTIC_MODE, DEXPILOT_MODE, SUPPORTED_RETARGET_MODES
 from .retargeter import MidasHandRetargeter
 
 
@@ -27,15 +28,29 @@ def _synthetic_open_hand_landmarks() -> np.ndarray:
 
 def smoke_main() -> None:
     parser = argparse.ArgumentParser(description="Run a one-frame MIDAS retargeting smoke test.")
+    parser.add_argument(
+        "--mode", default=ANALYTIC_MODE, choices=list(SUPPORTED_RETARGET_MODES),
+        help="Retargeting mode. The default needs nothing but numpy; the others "
+             "need the [vector] extra and a URDF, and only they read --urdf, "
+             "--mujoco-repo and --scaling-factor.",
+    )
     parser.add_argument("--urdf", default=None, help="Optional explicit MIDAS URDF path.")
     parser.add_argument("--mujoco-repo", default=None, help="Optional MIDAS MuJoCo repo path.")
     parser.add_argument("--scaling-factor", type=float, default=1.15)
     args = parser.parse_args()
 
+    # --mode exists so the three flags below are not inert. In analytic mode
+    # uses_optimizer is False, build_dex_config is never called, and none of
+    # them is read -- an --urdf pointing at nothing at all used to succeed.
+    extra = {}
+    if args.mode != DEXPILOT_MODE:
+        # dexpilot reads its scaling from the profile and rejects this field.
+        extra["scaling_factor"] = args.scaling_factor
     retargeter = MidasHandRetargeter.create(
+        mode=args.mode,
         urdf_path=args.urdf,
         mujoco_repo=args.mujoco_repo,
-        scaling_factor=args.scaling_factor,
+        **extra,
     )
     result = retargeter.retarget_landmarks(_synthetic_open_hand_landmarks())
     print("Active joint positions:")

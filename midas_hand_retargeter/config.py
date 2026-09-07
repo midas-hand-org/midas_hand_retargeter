@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .constants import (
     ACTIVE_JOINT_NAMES,
@@ -21,6 +22,9 @@ from .model import MIDAS_RIGHT_HAND, HandModel
 from .paths import default_urdf_path
 from .tuning import RetargeterTuning
 from .urdf import with_tip_links
+
+if TYPE_CHECKING:  # `params` imports this module, so only for annotations.
+    from .params import RetargetProfile
 
 #: Analytic geometric map only. The default. Needs no dex_retargeting, no
 #: torch and no URDF: the analytic layer writes all 13 actuated joints itself.
@@ -60,9 +64,10 @@ class MidasRetargeterConfig:
     handles those through MJCF closed-loop constraints; hardware handles them
     through the API PIP-DIP lookup.
 
-    Tune this class for optimizer behavior: target links, human landmark
-    indices, global scaling, and solver losses. Tune ``RetargeterTuning`` for
-    operator-facing finger/thumb response after optimization.
+    Tune this class for solver STRUCTURE: target links, human landmark
+    indices, and the two thumb policies. Everything an operator turns lives on
+    ``RetargetProfile`` instead (``FingerParams`` / ``ThumbParams`` /
+    ``DexPilotParams``), because that is what the tuning UI edits live.
     """
 
     # Path discovery: by default the package finds sibling midas_hand_mujoco.
@@ -76,8 +81,12 @@ class MidasRetargeterConfig:
     target_task_link_names: Sequence[str] = DEFAULT_TARGET_TASK_LINK_NAMES
     target_link_human_indices: Sequence[Sequence[int]] = DEFAULT_TARGET_LINK_HUMAN_INDICES
 
-    # TUNE: solver-level scaling and robust-loss widths. These are passed
-    # directly to dex-retargeting's vector optimizer.
+    # Solver-level scaling and robust-loss widths for the `vector` and
+    # `refine` modes, passed straight to dex-retargeting's vector optimizer.
+    # `dexpilot` reads its equivalents from RetargetProfile.dexpilot instead,
+    # and __post_init__ rejects non-default values here in that mode rather
+    # than ignoring them -- a setting that silently does nothing is how ~20
+    # dead CLI flags accumulated in this project before.
     scaling_factor: float = 1.15
     normal_delta: float = 4e-3
     huber_delta: float = 2e-2
@@ -127,7 +136,7 @@ class MidasRetargeterConfig:
     thumb_root_link: str | None = "thumb_cmc_side"
 
     #: Constrain the thumb MCP/DIP to flexion only, as the analytic map already
-    #: does (``postprocess.THUMB_MCP_RANGE``). The physical joint CAN
+    #: does (``ThumbParams.mcp_range``). The physical joint CAN
     #: hyperextend, so this is a teleop policy — natural posture over reachable
     #: workspace — not a joint limit. Measured: S-curve postures 42% -> 14%,
     #: MCP hyperextension +0.60 -> +0.00 rad, at no cost to fingertip accuracy.
@@ -148,7 +157,10 @@ class MidasRetargeterConfig:
     # extended), so it is rejected in __post_init__.
     thumb_postprocess: bool = True
     finger_postprocess: bool = True
-    tuning: RetargeterTuning = field(default_factory=RetargeterTuning)
+    #: Deliberately polymorphic: ``tuning_profile`` branches on the type and
+    #: ``MidasHandRetargeter`` runs it through ``as_profile``. The tuner passes
+    #: a ``RetargetProfile``; the legacy flat form is still accepted.
+    tuning: RetargetProfile | RetargeterTuning = field(default_factory=RetargeterTuning)
 
     def __post_init__(self) -> None:
         # Frozen dataclass: normalize through object.__setattr__ so the
@@ -206,12 +218,33 @@ class MidasRetargeterConfig:
                         f"{name} only applies to mode={DEXPILOT_MODE!r}, "
                         f"not mode={self.mode!r}."
                     )
+        else:
+            # The mirror image of the check above, and it was missing. In
+            # dexpilot mode _to_dexpilot_config_dict reads every solver knob
+            # from tuning_profile.dexpilot, so these four fields are dead --
+            # MidasRetargeterConfig(mode="dexpilot", scaling_factor=99.0)
+            # solved at 1.15 and said nothing. Someone reaching for
+            # scaling_factor while tuning on hardware deserves an error.
+            for name, default in (
+                ("scaling_factor", 1.15),
+                ("normal_delta", 4e-3),
+                ("huber_delta", 2e-2),
+                ("low_pass_alpha", 1.0),
+            ):
+                if getattr(self, name) != default:
+                    raise ValueError(
+                        f"{name}={getattr(self, name)!r} has no effect in "
+                        f"mode={DEXPILOT_MODE!r}: the solver knobs come from "
+                        f"RetargetProfile.dexpilot so they can be tuned live. "
+                        f"Set tuning=RetargetProfile().with_values("
+                        f"{{'dexpilot.{name}': ...}}) instead."
+                    )
 
     @property
     def uses_optimizer(self) -> bool:
         """Whether this config needs dex_retargeting (and so torch/pinocchio)."""
 
-        return self.mode in (VECTOR_MODE, REFINE_MODE, DEXPILOT_MODE)
+        return self.mode in _OPTIMIZER_MODES
 
     def resolved_urdf_path(self) -> Path:
         if self.urdf_path is not None:

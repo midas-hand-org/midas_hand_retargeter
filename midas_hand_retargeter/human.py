@@ -23,17 +23,27 @@ translation — see ``tests/test_postprocess_invariance.py``, which pins exactly
 this. A practical consequence: **mirroring glove input to "fix" tracking does
 nothing**, and ``mirror_landmarks_for_robot_hand`` is a no-op for this layer.
 
-**The vector optimizer is handed, and still needs chirality preserved.**
-``landmarks_to_vectors`` feeds Cartesian targets straight to the solver, which
-matches them against a right-handed robot model, so a mirrored frame produces a
-genuinely mirrored solve. Sources feeding ``retarget_vectors`` (or the
-``vector``/``refine`` paths) must apply a proper rotation and an *even* number
-of axis reflections; ``mirror_landmarks_for_robot_hand`` exists for that case.
-See ``midas_hand_teleop.manus_glove.manus_bridge`` for the glove's frame remap.
+**Every Cartesian mode is handed, and needs chirality preserved.** That is
+``vector``, ``refine`` and ``dexpilot``. ``landmarks_to_vectors`` feeds
+Cartesian targets straight to the solver, which matches them against a
+right-handed robot model, so a mirrored frame produces a genuinely mirrored
+solve. Such sources must apply a proper rotation and an *even* number of axis
+reflections; ``mirror_landmarks_for_robot_hand`` exists for that case. See
+``midas_hand_teleop.manus_glove.manus_bridge`` for the glove's frame remap.
 
-Since the analytic layer is the default and drives all 13 actuated joints, a
-frame problem is almost never the cause of bad tracking. Look at the tuning
-gains and bend normalizers first.
+Palm-framing (``postprocess.landmarks_to_palm_frame``, applied to ``dexpilot``
+input) removes **rotation** but not **reflection**. Measured on the
+``curl_middle_only`` golden pose: max |delta| 7.5e-9 under a 0.7 rad Z
+rotation, but 0.155 rad under a Y or X flip. So it does not make DexPilot
+frame-invariant the way the analytic layer is — a mirrored or left-handed glove
+frame still reaches the solver, which is exactly why ``DEFAULT_GLOVE_FRAME`` has
+to be a reflection for this hand.
+
+So which layer you are running decides whether the frame can be the problem.
+In ``analytic`` it cannot, and you should look at the tuning gains and bend
+normalizers first. In ``dexpilot`` — the mode glove teleop uses — a mirrored
+frame is a live possibility, and the symptom is fingers that refuse to curl
+because the solver is being asked to bend them backwards.
 """
 
 from __future__ import annotations

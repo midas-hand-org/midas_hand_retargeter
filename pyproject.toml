@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # dex_retargeting pulls torch (~1.2 GB) plus the CUDA wheel stack (~2.7 GB).
-# Only mode="vector" and mode="refine" need it.
+# Needed by every optimizer mode: "dexpilot", "vector" and "refine".
 vector = ["dex_retargeting>=0.5.0", "torch>=2.0"]
 # coupling_mode="pip_dip_lookup" reads the packaged four-bar table.
 lookup = ["midas-hand>=0.1.0"]

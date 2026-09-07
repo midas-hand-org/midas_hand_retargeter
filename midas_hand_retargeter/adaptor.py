@@ -24,7 +24,6 @@ from .constants import FINGER_NAMES
 from .coupling import (
     COUPLED_PIP_DIP_MODE,
     FIXED_PASSIVE_MODE,
-    OPTION_2_COUPLING_MODES,
     PIP_DIP_LOOKUP_MODE,
     SUPPORTED_COUPLING_MODES,
     LookupPassiveCoupling,
@@ -38,7 +37,6 @@ from .coupling import (
 __all__ = [
     "COUPLED_PIP_DIP_MODE",
     "FIXED_PASSIVE_MODE",
-    "OPTION_2_COUPLING_MODES",
     "PIP_DIP_LOOKUP_MODE",
     "SUPPORTED_COUPLING_MODES",
     "MidasCoupledKinematicAdaptor",

@@ -2,6 +2,77 @@
 
 ## 0.2.0 (unreleased)
 
+### Added — DexPilot mode
+
+- **`mode="dexpilot"`**, and it is now the recommended mode for glove teleop.
+  It optimises six pairwise inter-fingertip vectors plus four palm-rooted ones,
+  so unlike every other mode it controls where the fingertips sit *relative to
+  each other* — the thing the analytic map structurally cannot do, being blind
+  to absolute hand geometry. Measured mean inter-fingertip error 8.3 mm against
+  the analytic map's 24 mm.
+- **`DexPilotParams`**, 12 live-tunable solver knobs, all applied per solve with
+  no rebuild. Notable ones:
+  - `scaling_factor` — the load-bearing knob in this mode; a 0.7×–1.5× change
+    moves joints by ~1.5 rad. `calibrate_scaling_from_landmarks()` measures it
+    from a held open pose instead of making the operator guess.
+  - `abduction_limit` (default 0.25 rad) — bounds finger abduction. A human's
+    fingertips converge as they curl; the MIDAS fingers curl in parallel planes
+    and can only imitate that by abducting, and it is nearly free for the
+    solver to do so (locking abduction costs 0.5 mm of inter-fingertip
+    accuracy). Unbounded, that produced 0.77 rad of sideways swing on a plain
+    curl. Bounded: 0.35 rad, for +0.3 mm.
+  - `spread_scale`, `thumb_vector_scale`, `smoothing_alpha`.
+- **Palm-frame input** for `dexpilot` (`palm_frame_input`), so how the operator
+  holds their wrist is not read as finger articulation. Removes rotation
+  (max |Δ| 7.5e-9 under a 0.7 rad rotation) but *not* reflection (0.155 rad),
+  so input chirality still matters.
+- **Thumb-root rebase** (`thumb_root_link="thumb_cmc_side"`). The MIDAS thumb
+  reaches 180 mm from the palm against an operator's ~121 mm, because two
+  segments have no human counterpart: a 41.4 mm palm→CMC-roll offset and a
+  24.7 mm CMC mechanism. Comparing against the CMC instead of the palm drops
+  both, taking the thumb/index proportion from 1.43 to 1.19 against a human's
+  1.17. Thumb bend 0.71 → 0.37 rad and jitter 0.416 → 0.163 rad.
+- **Flexion-only thumb bounds** (`thumb_flexion_only`), a deliberate teleop
+  policy: the physical joint can hyperextend, and the solver used that DOF to
+  produce anatomically impossible S-curves on 42% of frames. Now 14%.
+- `calibrate_scaling_from_landmarks` (hand size) and
+  `calibrate_neutral_from_last_frame` (zero pose), plus `presets` save/load
+  that carries the zero pose so a tuning session is reproducible.
+- `presets.resolve`, so a preset can be addressed by name from a CLI as well as
+  from the browser.
+
+### Fixed
+
+- **Glove input was mirrored.** The analytic map is provably reflection-
+  invariant, so this was invisible until `dexpilot` — which is handed — was
+  asked to bend the fingers backwards and held them extended 87% of the time,
+  with the ring finger tracking *inverted* (correlation −0.10). Restoring a
+  reflection took that to +0.83 and mean inter-fingertip error from 17.1 mm to
+  9.6 mm.
+- **The thumb tip frame pointed backwards** into the palm: 28 mm *closer* to
+  the palm than the thumb DIP, cos −0.84 against the distal direction, now
+  +0.96. Every thumb reach measurement taken before this was wrong, including
+  the one that said the thumb was too short when it is proportionally long.
+- **The Cartesian objective ignored the PIP-DIP four-bar coupling**, so it
+  aimed at a fingertip up to 59 mm from where the linkage puts it. Those modes
+  now default to `coupling_mode="pip_dip_lookup"`.
+- **The first solved frame latched forever** in the optimizer-only modes:
+  `_hold_disabled_joints` held every active joint absent from the analytic
+  targets, and those modes produce none.
+- **Neutral calibration could undo the thumb bounds**, rescaling by the model's
+  +1.57 and commanding up to +0.27 rad of the hyperextension the solver had
+  been forbidden to produce.
+- Saving a preset silently reset every solver knob to its default.
+- The four-bar coupling agreeing with `midas_hand_api` is now pinned by a test.
+  It always did agree; the comparison had been made against the API's
+  lookup-space function rather than its motor-space one, and was recorded here
+  as a conflict to settle on hardware.
+
+### Removed
+
+- 15 dead module constants in `postprocess` left behind by the per-finger
+  params migration, with no reader anywhere in any of the three repos.
+
 ### Changed
 
 - **The analytic geometric map is now the default retargeting method**
@@ -21,7 +92,8 @@
 
 ### Added
 
-- `mode` on `MidasRetargeterConfig`: `analytic` / `vector` / `refine`.
+- `mode` on `MidasRetargeterConfig`: `analytic` / `dexpilot` / `vector` /
+  `refine`.
 - `RetargetProfile`, `FingerParams`, `ThumbParams`: 50 per-digit parameters,
   including the output ranges, splay deadzone/limit/curl-damping, curl blend
   weight and the thumb's neutral angle and span — all previously hardcoded.

@@ -8,8 +8,9 @@ initial solution, but the MIDAS model has two practical wrinkles:
 2. Finger ab/ad and thumb CMC motion are sensitive to camera noise and user
    anatomy, so they get a small amount of MIDAS-specific shaping.
 
-This module owns those mappings. Only broad gains/smoothing live in
-``RetargeterTuning``; the rest stays as implementation constants here.
+This module owns those mappings. Every parameter they read is a per-digit
+field on ``RetargetProfile`` (``FingerParams`` / ``ThumbParams``); the legacy
+flat ``RetargeterTuning`` is still accepted and converted on the way in.
 """
 
 from __future__ import annotations
@@ -46,29 +47,11 @@ FINGER_LANDMARKS = {
 # MediaPipe thumb landmark indices: CMC, MCP, IP, tip.
 THUMB_LANDMARKS = (1, 2, 3, 4)
 
-# Internal MIDAS command ranges. These are not live-tuning knobs; they encode
-# the current robot model's useful active-joint range for postprocess targets.
-FINGER_MCP_PITCH_RANGE = (0.0, -1.35)
-FINGER_PIP_RANGE = (0.0, -1.22)
-FINGER_ABAD_DEADZONE = 0.05
-FINGER_ABAD_LIMIT = 0.785
-FINGER_ABAD_CURL_DAMPING = 0.5
-
-THUMB_CMC_ROLL_RANGE = (0.0, 2.15)
-THUMB_CMC_ROLL_DEADZONE = 0.05
-THUMB_CMC_ROLL_SPAN = 0.45
-THUMB_CMC_SIDE_OPEN = 0.0
-THUMB_CMC_SIDE_RANGE = (-0.785, 0.9)
-THUMB_CMC_SIDE_NEUTRAL_ANGLE = -0.3
-THUMB_CMC_SIDE_DEADZONE = 0.05
-
-THUMB_MCP_RANGE = (0.0, -1.57)
-THUMB_DIP_RANGE = (0.0, -1.57)
-THUMB_DIP_MCP_FOLLOW = 0.3
-
-# Human bend -> curl normalizers (FINGER_CURL_MAX_BEND, THUMB_MCP_MAX_BEND,
-# THUMB_DIP_MAX_BEND) are source-sensitive and now live on ``RetargeterTuning``
-# so vision and glove can normalize their different measured ROM independently.
+# Every command range, deadzone, limit and bend normalizer that used to be a
+# module constant here is now a per-digit field on ``FingerParams`` /
+# ``ThumbParams`` -- see ``params.py``. They are all live-tunable, so nothing
+# belongs here any more: a constant in this file would be a knob the tuning UI
+# cannot reach, which is how the previous set came to be silently dead.
 
 
 @dataclass
@@ -84,8 +67,12 @@ class JointTargetFilter:
         """Blend a new target into the previous target.
 
         ``alpha`` is the usual low-pass coefficient: ``1.0`` means no filtering,
-        smaller values are smoother but add more lag. This is currently used for
-        finger MCP ab/ad, which is much noisier than finger curl.
+        smaller values are smoother but add more lag.
+
+        Used for every landmark-derived target, at each digit's own alpha --
+        ab/ad wants more smoothing than curl, being much the noisier signal --
+        and, in the optimizer-only modes, over the whole 13-joint active vector
+        at ``DexPilotParams.smoothing_alpha``.
         """
 
         alpha = float(np.clip(alpha, 0.0, 1.0))
@@ -394,9 +381,14 @@ def landmarks_to_palm_frame(landmarks: np.ndarray) -> np.ndarray:
 
     Output axes match the robot's palm frame: X lateral (index->ring), Y
     forward (wrist->middle MCP), Z palm normal. Applying this makes DexPilot
-    frame-invariant like the analytic layer, which is what we want for a
-    hand-only robot: how the operator holds their wrist should not be read as
-    finger articulation. Wrist pose belongs to the arm, not the fingers.
+    ROTATION-invariant, which is what we want for a hand-only robot: how the
+    operator holds their wrist should not be read as finger articulation. Wrist
+    pose belongs to the arm, not the fingers.
+
+    It does NOT make DexPilot reflection-invariant, unlike the analytic layer
+    which is invariant under both. Measured on the ``curl_middle_only`` pose:
+    max |delta| 7.5e-9 under a 0.7 rad Z rotation, 0.155 rad under a Y flip.
+    Chirality still has to be right in the input frame.
     """
 
     points = as_landmarks(landmarks)

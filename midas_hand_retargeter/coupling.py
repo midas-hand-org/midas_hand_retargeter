@@ -132,11 +132,20 @@ class LookupPassiveCoupling:
     flip that relationship.
 
     .. note::
-       ``midas_hand_api.kinematics.pip_to_dip_position`` feeds the *same* table
-       with no sign flip, i.e. the two packages currently hold opposite
-       conventions. Settle this on hardware before commanding the real hand:
-       command a known PIP angle, measure the DIP, and keep the convention that
-       matches. See ``TODO(hardware-day)`` in the runbook.
+       This agrees with ``midas_hand_api``, which was not obvious and was
+       recorded here as a disagreement for a while. The API exposes the table
+       through two functions: ``pip_to_dip_position`` takes a *lookup-space*
+       (positive) angle and applies no flip, while ``passive_dip_from_pip_motor``
+       takes a *motor-space* (negative-in-flexion) angle and negates it exactly
+       as this class does. Compared against the motor-space one -- the only one
+       a hardware angle should ever reach -- the two match to 1e-6 across the
+       whole PIP range: -0.20 -> -0.4758, -0.90 -> -1.4509, -1.45 -> -1.9054.
+
+       Nothing here reaches a motor in any case. The finger DIPs are passive
+       four-bar links with no servo, so they are absent from
+       ``HARDWARE_MOTOR_JOINT_NAMES``; this coupling exists to make the
+       simulator and the Cartesian objective see the fingertip the linkage
+       actually produces.
     """
 
     def __init__(

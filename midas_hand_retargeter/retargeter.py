@@ -561,7 +561,7 @@ class MidasHandRetargeter:
         # assigning a (10, 1) array gives per-vector scaling by broadcast. Note
         # a pair that is actively PROJECTED (a detected pinch) takes its target
         # from projected_dist instead and bypasses this, which is fine.
-        if params.thumb_vector_scale != 1.0 and self.config.mode == DEXPILOT_MODE:
+        if params.thumb_vector_scale != 1.0:
             optimizer.scaling = float(params.scaling_factor) * self._thumb_vector_weights(
                 params.thumb_vector_scale
             )
@@ -646,7 +646,15 @@ class MidasHandRetargeter:
         The remaining thumb mismatch is handled structurally instead, by
         ``MidasRetargeterConfig.thumb_root_link``.
 
-        Returns the scaling that was applied.
+        **Also sets ``spread_scale``**, which is a second, independent
+        quantity: finger SPACING rather than finger REACH, fitted from the
+        fingertip span at rest. It is deliberate -- ``DexPilotParams.
+        spread_scale`` says to let this method set it -- but it means one
+        button changes two knobs, and spread_scale has its own accuracy
+        tradeoff documented on that field. Both values are logged.
+
+        Returns the scaling that was applied. Read ``profile.dexpilot.
+        spread_scale`` for the other one.
         """
 
         if landmarks is None:
@@ -746,10 +754,11 @@ class MidasHandRetargeter:
     ) -> np.ndarray:
         """Apply the optional landmark-derived MIDAS correction layer.
 
-        The vector optimizer remains the primary retargeter. This layer exists
-        for MIDAS-specific real-time behavior that is difficult to express in
-        the generic vector objective, especially passive-DIP finger curl and
-        thumb opposition. Tune it through ``RetargeterTuning``.
+        In ``analytic`` this layer IS the retargeter and writes all 13 joints.
+        In ``refine`` it runs after the solver and overwrites everything the
+        solver produced. The optimizer-only modes (``vector``, ``dexpilot``)
+        never reach here. Tune it through ``RetargetProfile`` -- per digit, via
+        ``FingerParams`` / ``ThumbParams``.
         """
 
         # Read the live profile exactly once per frame and thread it through,
